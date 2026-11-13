@@ -21,7 +21,10 @@ namespace Kameo.Core
             "OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY", "CODEX_HOME", "CODEX_ACCESS_TOKEN",
             "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_ACCESS_TOKEN",
             "GOOGLE_GENAI_USE_VERTEXAI", "GOOGLE_GENAI_USE_GCA", "GOOGLE_GEMINI_BASE_URL", "GEMINI_CLI_HOME",
-            "GEMINI_FORCE_ENCRYPTED_FILE_STORAGE", "GEMINI_FORCE_FILE_STORAGE", "MUX_CONFIG_DIR", "KAMEO_MUX_API_KEY"
+            "GEMINI_FORCE_ENCRYPTED_FILE_STORAGE", "GEMINI_FORCE_FILE_STORAGE", "MUX_CONFIG_DIR", "KAMEO_MUX_API_KEY",
+            "AGY_ADC_AUTH", "AGY_ACCOUNT", "AGY_LLM_GATEWAY_API_KEY", "AGY_LLM_GATEWAY_URL", "AGY_LLM_GATEWAY_HEADERS",
+            "AGY_CDE_ENTERPRISE_AUTH", "AGY_CDE_SEAMLESS_AUTH", "ANTIGRAVITY_GEMINI_DIR", "ANTIGRAVITY_CONFIG_REL_DIR",
+            "ANTIGRAVITY_APP_DATA_DIR", "ANTIGRAVITY_CREDENTIAL_SCOPE"
         };
 
         /// <summary>Creates a launcher.</summary>
@@ -36,10 +39,12 @@ namespace Kameo.Core
             string directory = _Store.ProfileDirectory(profile.Id);
             if (!Directory.Exists(directory)) throw new DirectoryNotFoundException("The profile directory is missing. Recreate the profile or restore a backup.");
             ValidateArguments(profile.Harness, arguments);
+            if (profile.Kind == CredentialKind.Native && !HarnessCatalog.SupportsNativeLogin(profile.Harness))
+                throw new InvalidOperationException("Antigravity currently supports API-key profiles in Kameo. Create a new API-key profile; your previous Gemini login data is preserved.");
             if (login && profile.Kind != CredentialKind.Native) throw new InvalidOperationException("API-key profiles do not need a browser login.");
             ProcessStartInfo start = new ProcessStartInfo
             {
-                FileName = string.IsNullOrWhiteSpace(profile.Executable) ? HarnessCatalog.Command(profile.Harness) : profile.Executable,
+                FileName = string.IsNullOrWhiteSpace(profile.Executable) ? HarnessCatalog.Executable(profile.Harness) : profile.Executable,
                 WorkingDirectory = Path.GetFullPath(workingDirectory ?? Environment.CurrentDirectory), UseShellExecute = false
             };
             foreach (string name in _CredentialVariables) start.Environment.Remove(name);
@@ -64,20 +69,18 @@ namespace Kameo.Core
                     }
                     if (login) start.ArgumentList.Add("login");
                     break;
-                case HarnessKind.Gemini:
-                    start.Environment["GEMINI_CLI_HOME"] = directory;
-                    start.Environment["GEMINI_FORCE_FILE_STORAGE"] = "true";
-                    start.Environment["GEMINI_FORCE_ENCRYPTED_FILE_STORAGE"] = "false";
-                    if (profile.Kind == CredentialKind.ApiKey) start.Environment["GEMINI_API_KEY"] = profile.ApiKey;
-                    string settingsPath = Path.Combine(directory, ".gemini", "settings.json");
+                case HarnessKind.Antigravity:
+                    start.Environment["GEMINI_API_KEY"] = profile.ApiKey;
+                    start.ArgumentList.Add("--gemini_dir"); start.ArgumentList.Add(directory);
+                    start.ArgumentList.Add("--settings"); start.ArgumentList.Add("{\"modelProvider\":\"gemini\"}");
+                    string settingsPath = Path.Combine(directory, "antigravity-cli", "settings.json");
                     JsonObject settings = File.Exists(settingsPath) ? JsonNode.Parse(PrivateFiles.Read(settingsPath)) as JsonObject ?? new JsonObject() : new JsonObject();
-                    settings["security"] ??= new JsonObject();
-                    settings["security"]!["auth"] ??= new JsonObject();
-                    settings["security"]!["auth"]!["selectedType"] = profile.Kind == CredentialKind.ApiKey ? "gemini-api-key" : "oauth-personal";
+                    settings["modelProvider"] = "gemini";
                     PrivateFiles.Write(settingsPath, settings.ToJsonString());
                     break;
                 case HarnessKind.Mux:
                     start.Environment["MUX_CONFIG_DIR"] = directory;
+                    if (profile.MuxEndpointsFile.Length > 0) MuxEndpointLink.Refresh(_Store, profile);
                     if (profile.Kind == CredentialKind.ApiKey)
                     {
                         if (!File.Exists(Path.Combine(directory, "endpoints.json"))) throw new InvalidOperationException("Configure a model and endpoint for this Mux profile first.");
@@ -129,6 +132,7 @@ namespace Kameo.Core
                     HarnessKind.Mux => argument == "--config-dir" || argument.StartsWith("--config-dir=", StringComparison.Ordinal),
                     HarnessKind.Claude => argument == "--settings" || argument.StartsWith("--settings=", StringComparison.Ordinal),
                     HarnessKind.Codex => argument.Contains("cli_auth_credentials_store", StringComparison.Ordinal) || argument.Contains("forced_login_method", StringComparison.Ordinal),
+                    HarnessKind.Antigravity => argument.TrimStart('-').Split('=')[0] is "gemini_dir" or "gemini-dir" or "settings" or "remote-agent" or "remote-control" or "flagfile" or "undefok",
                     _ => false
                 };
                 if (blocked) throw new ArgumentException("That argument overrides Kameo's profile authentication or directory. Configure the profile in Kameo instead.", nameof(arguments));

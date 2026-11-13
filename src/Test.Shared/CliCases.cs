@@ -36,6 +36,30 @@ namespace Test.Shared
                 CliResult result = await RunAsync(fixture, new[] { "unknown-command" }, null, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(result.ExitCode != 0 && result.Error.Contains("Unknown command", StringComparison.Ordinal), "Unknown command should fail with usage guidance.");
             }),
+            KameoSuites.Case("Cli", "SharedMuxFileCanBeAddedChangedAndCleared", async (fixture, cancellationToken) =>
+            {
+                string first = Path.Combine(fixture.Root, "First endpoints.json");
+                string second = Path.Combine(fixture.Root, "Second endpoints.json");
+                File.WriteAllText(first, CredentialCases.Document(HarnessKind.Mux));
+                File.WriteAllText(second, CredentialCases.Document(HarnessKind.Mux));
+                CliResult add = await RunAsync(fixture, new[] { "add", "mux", "Shared", "--native", "--endpoints-file", first }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(add.ExitCode == 0, "Shared Mux creation failed.");
+                string id = add.Output.Trim();
+                Fixture.Check(fixture.Store.Get(id).MuxEndpointsFile == first, "CLI lost the shared path.");
+                CliResult edit = await RunAsync(fixture, new[] { "edit", id, "--endpoints-file", second }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(edit.ExitCode == 0 && fixture.Store.Get(id).MuxEndpointsFile == second, "CLI did not change the shared path.");
+                CliResult clear = await RunAsync(fixture, new[] { "edit", id, "--endpoints-file", "" }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(clear.ExitCode == 0 && fixture.Store.Get(id).MuxEndpointsFile.Length == 0 && File.Exists(first) && File.Exists(second), "CLI did not clear the link while preserving both sources.");
+            }),
+            KameoSuites.Case("Cli", "AntigravityAcceptsApiKeysAndRejectsNative", async (fixture, cancellationToken) =>
+            {
+                CliResult native = await RunAsync(fixture, new[] { "add", "antigravity", "Native", "--native" }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(native.ExitCode == 1 && fixture.Store.List().Count == 0, "Unsupported native authentication created a profile.");
+                CliResult add = await RunAsync(fixture, new[] { "add", "antigravity", "API", "--api-key-stdin" }, "synthetic-antigravity-key\n", cancellationToken).ConfigureAwait(false);
+                Fixture.Check(add.ExitCode == 0, "Antigravity API creation failed.");
+                Profile profile = fixture.Store.Get(add.Output.Trim());
+                Fixture.Check(profile.Harness == HarnessKind.Antigravity && profile.ApiKey == "synthetic-antigravity-key", "Antigravity API credentials did not persist.");
+            }),
             KameoSuites.Case("Cli", "RunRelaysChildExitCode", async (fixture, cancellationToken) =>
             {
                 Profile profile = fixture.Add(); profile.Executable = Fixture.Probe(); fixture.Store.Update(profile);

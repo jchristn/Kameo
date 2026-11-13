@@ -7,8 +7,8 @@ namespace Kameo.Core
         Claude,
         /// <summary>OpenAI Codex CLI.</summary>
         Codex,
-        /// <summary>Google Gemini CLI.</summary>
-        Gemini,
+        /// <summary>Google Antigravity CLI. Numeric value 2 preserves legacy Gemini profiles.</summary>
+        Antigravity = 2,
         /// <summary>Mux CLI.</summary>
         Mux
     }

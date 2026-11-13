@@ -11,9 +11,10 @@ Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. I
 ## Features
 
 - Add, rename, edit, import, select, and delete credential profiles.
-- API keys and native subscription/OAuth logins, using each harness's own authentication flow.
+- API keys for all supported harnesses; isolated native subscription/OAuth logins for Claude Code and Codex, and endpoint-file profiles for Mux.
 - Import existing native credential files without modifying the originals.
-- Independent selections for Claude Code, Codex, Gemini CLI, and Mux.
+- Independent selections for Claude Code, Codex, Antigravity, and Mux.
+- Shared Mux endpoints files: choose one JSON file for multiple profiles and pick up source changes at the next launch.
 - Tray selection, search, launch-folder selection, and a compact desktop manager.
 - 16 palettes with coordinated light and dark backgrounds, panels, and accents: Fern, Ocean, Iris, Amber, Rose, Graphite, Seafoam, Lagoon, Cobalt, Lavender, Coral, Sand, Espresso, Midnight, Paper, and Nord.
 - Native macOS application menus, including About, Edit, Profiles, View, Window, and Quit.
@@ -88,7 +89,7 @@ Remove any Kameo `PATH` entries, aliases, shortcuts, or symlinks you added manua
 ## Add your first profile
 
 1. Select a harness and click **Add profile**.
-2. Choose **API key** or **Native login / import**. For a Mux API-key profile, also choose the adapter, endpoint, and model.
+2. Choose **API key** or **Native login / import**. Antigravity currently offers API keys only. For Mux, choose **API key** and enter the adapter, endpoint, and model, or choose **Endpoints file / setup** and browse to an existing endpoints JSON file.
 3. For native authentication, click **Sign in** to open the harness in a terminal, **Import current** to copy an existing login, or **Import...** to select a native credential JSON file. Mux's **Setup** opens its interactive TUI and first-run wizard; an existing Mux profile can use its F1 setup command.
 4. Click **Use profile** or choose the profile from the tray. The first profile for a harness is selected automatically.
 5. Click **Launch** to use the saved launch folder, **Launch in...** to choose a folder for this session only, or use a Kameo terminal command. Canceling the folder picker starts nothing; choosing a folder with **Launch in...** does not change the saved launch folder in the sidebar.
@@ -134,12 +135,12 @@ The examples below assume `PATH` is configured. Otherwise, replace `kameo` with 
 ```sh
 kameo claude
 kameo codex
-kameo gemini
+kameo antigravity
 kameo mux
 kameo run codex -- --help
 ```
 
-These are Kameo commands; the original `claude`, `codex`, `gemini`, and `mux` commands keep their existing behavior. Wrappers preserve the current working directory, argument boundaries, and harness exit code. Desktop **Launch** uses the saved launch folder; **Launch in...** uses the folder chosen for that invocation.
+These are Kameo commands; the original `claude`, `codex`, `agy`, and `mux` commands keep their existing behavior. `kameo antigravity` launches Antigravity's `agy` executable. Wrappers preserve the current working directory, argument boundaries, and harness exit code. Desktop **Launch** uses the saved launch folder; **Launch in...** uses the folder chosen for that invocation.
 
 ```sh
 kameo list
@@ -154,7 +155,7 @@ kameo run-profile prf_REPLACE_WITH_ID -- --help
 kameo delete prf_REPLACE_WITH_ID
 ```
 
-`--device-auth` is a Codex option. Gemini starts its interactive sign-in screen. Native-login completion is handled by the harness, including opening its browser and accepting any required login code. A saved credential indicator means a file exists; it does not claim that remote access has been validated.
+`--device-auth` is a Codex option. Native-login completion is handled by the harness, including opening its browser and accepting any required login code. A saved credential indicator means a file exists; it does not claim that remote access has been validated.
 
 API keys are entered in the desktop or supplied through standard input, never as CLI arguments. For example, if you already have a key in your environment:
 
@@ -172,18 +173,41 @@ The desktop provides the same fields. Mux's current source has no separate subsc
 
 Run `kameo --help` for the full command list. `KAMEO_HOME` or `kameo --home /absolute/path ...` selects an alternate data directory.
 
+### Antigravity API-key profiles
+
+Install [Antigravity CLI](https://antigravity.google/docs/cli/install) separately and verify `agy --help` works in your terminal. Kameo's integration was checked against CLI 1.5.7. Create an **Antigravity → API key** profile with a Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey), then select it and launch. Kameo enables the Gemini API provider and passes the selected key to the child process.
+
+Antigravity account sign-in uses a shared OS keyring. Kameo currently supports **API keys only** for Antigravity because per-profile Google account isolation has not been verified. Existing Gemini API-key profiles retain their keys and selections and now launch `agy`. Clear or update any old `gemini` executable override in the profile editor. Existing Gemini native-login profiles and their files remain intact, but their launch and sign-in actions are disabled; create a new API-key profile to use Antigravity. `kameo gemini` and `kameo agy` are compatibility aliases for `kameo antigravity`, subject to the same API-key restriction.
+
+### Share a Mux endpoints file
+
+1. Select **Mux** and add a profile with **Endpoints file / setup**, or edit an existing Mux file profile.
+2. Under **Shared endpoints file**, click **Browse endpoints...**. The picker starts in `~/.mux` for a new link; select any of your endpoints JSON files.
+3. Save. Repeat for other profiles and choose the same file when you want them to share endpoints.
+
+Kameo stores the source path and reads it again before each launch, placing a fresh copy in that profile's isolated Mux directory. Edits to the shared file apply to future launches. Running sessions keep their existing configuration. Kameo never edits or deletes the source, including when you delete a profile. Missing or invalid source files stop the launch rather than silently using an old copy. Environment references in shared endpoints are resolved from Kameo's environment at launch time; the referenced variables must be available there.
+
+To stop sharing, clear **Shared endpoints file** and save; the most recent local copy remains available for this profile's Setup or import actions. For an independent copy from the outset, leave the shared file field blank and use **Import...** after saving. API-key profiles use their own key/endpoint fields; create an endpoints-file profile to use a file's existing credentials.
+
+The CLI supports the same link:
+
+```sh
+kameo add mux "Shared work" --native --endpoints-file "$HOME/.mux/work-endpoints.json"
+kameo edit prf_REPLACE_WITH_ID --endpoints-file /absolute/path/to/endpoints.json
+```
+
 ## Authentication isolation
 
 | Harness | Profile isolation | Native artifact |
 | --- | --- | --- |
 | Claude Code | `CLAUDE_CONFIG_DIR` | `.credentials.json`; scoped Keychain bridge on macOS |
 | Codex | `CODEX_HOME`, file credential storage | `auth.json` |
-| Gemini CLI | `GEMINI_CLI_HOME`, file credential storage | `.gemini/oauth_creds.json` |
-| Mux | `MUX_CONFIG_DIR` | `endpoints.json` |
+| Antigravity | `agy --gemini_dir`, profile settings, `GEMINI_API_KEY` | API keys only; prior Gemini OAuth files are preserved |
+| Mux | `MUX_CONFIG_DIR` | `endpoints.json`, imported or refreshed from a shared source |
 
 Kameo keeps a stable native directory for each profile, allowing the harness to refresh its own tokens and retain its profile-specific state. It does not copy refreshed tokens back into the original imported login. On macOS, Claude's directory-scoped Keychain entry is restored from the profile's file before launch and snapshotted after exit. Deleting that profile also removes its scoped Keychain entry, leaving the default login alone.
 
-Existing file-based logins and Claude's macOS Keychain login can be imported automatically. For Codex or Gemini logins stored only in an OS credential store, use **Sign in** to create an isolated login or import an exported native credential file. Provider credential formats may evolve; the [integration notes](docs/ARCHITECTURE.md) record the contracts used here.
+Existing supported file-based logins and Claude's macOS Keychain login can be imported automatically. For Codex logins stored only in an OS credential store, use **Sign in** to create an isolated login or import an exported native credential file. Antigravity native-login imports are currently unavailable. Provider credential formats may evolve; the [integration notes](docs/ARCHITECTURE.md) record the contracts used here.
 
 One running Kameo invocation holds an exclusive lease on its profile. Another invocation of that same profile, editing, import, or deletion waits for you to close it first; Kameo reports that the profile is in use. Other profiles can run concurrently, and you can change the selection at any time. This avoids concurrent native token refresh and destructive edits during a session.
 
@@ -217,7 +241,7 @@ Startup entries point to this clone's build output. Re-register them if you move
 ## Troubleshooting and issues
 
 - **A harness cannot be found:** install it in the same Windows, macOS, Linux, or WSL environment as Kameo. Set its executable path in the profile if a desktop launch does not inherit your shell's `PATH`.
-- **The wrong account appears:** launch with `kameo claude`, `kameo codex`, `kameo gemini`, or `kameo mux`. Running the original harness command directly does not use Kameo's selection. Existing sessions keep the identity they started with.
+- **The wrong account appears:** launch with `kameo claude`, `kameo codex`, `kameo antigravity`, or `kameo mux`. Running the original harness command directly does not use Kameo's selection. Existing sessions keep the identity they started with.
 - **A profile is in use:** close the agent session using that profile before editing, importing, deleting, or launching it again.
 - **There is no tray icon on Linux or WSL:** use the manager window; tray availability depends on the desktop environment.
 - **A native login has expired:** select the profile and use **Sign in**, or import its updated native credential file.

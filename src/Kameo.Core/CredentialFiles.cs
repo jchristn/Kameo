@@ -26,6 +26,7 @@ namespace Kameo.Core
             using FileStream lease = _Store.AcquireLease(id);
             Profile profile = _Store.Get(id);
             if (profile.Kind != CredentialKind.Native) throw new InvalidOperationException("Import is available for native login profiles only.");
+            if (profile.MuxEndpointsFile.Length > 0) throw new InvalidOperationException("This profile uses a shared endpoints file. Clear its endpoints-file link before importing a separate copy.");
             Validate(profile.Harness, rawCredentialJson);
             if (profile.Harness == HarnessKind.Mux) rawCredentialJson = MuxCredentialImport.Resolve(rawCredentialJson, Environment.GetEnvironmentVariable);
             PrivateFiles.Write(Path.Combine(_Store.ProfileDirectory(id), HarnessCatalog.CredentialFile(profile.Harness)), rawCredentialJson);
@@ -36,6 +37,7 @@ namespace Kameo.Core
         public static void Validate(HarnessKind harness, string rawCredentialJson)
         {
             ArgumentNullException.ThrowIfNull(rawCredentialJson);
+            if (!HarnessCatalog.SupportsNativeLogin(harness)) throw new InvalidOperationException("Antigravity native-login import is not supported. Create an API-key profile instead.");
             if (rawCredentialJson.Length > 1024 * 1024) throw new InvalidDataException("Credential files must be smaller than 1 MiB.");
             try
             {
@@ -45,7 +47,6 @@ namespace Kameo.Core
                 {
                     HarnessKind.Claude => root.TryGetProperty("claudeAiOauth", out JsonElement oauth) && HasString(oauth, "accessToken") && HasString(oauth, "refreshToken"),
                     HarnessKind.Codex => HasString(root, "OPENAI_API_KEY") || (root.TryGetProperty("tokens", out JsonElement tokens) && HasString(tokens, "access_token") && HasString(tokens, "refresh_token")),
-                    HarnessKind.Gemini => HasString(root, "refresh_token"),
                     HarnessKind.Mux => root.TryGetProperty("endpoints", out JsonElement endpoints) && endpoints.ValueKind == JsonValueKind.Array && endpoints.GetArrayLength() > 0 && ValidEndpoints(endpoints),
                     _ => false
                 };

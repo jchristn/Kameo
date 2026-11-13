@@ -52,7 +52,7 @@ namespace Kameo.Cli
                     {
                         Harness = HarnessCatalog.Parse(args[1]), Name = args[2], Kind = native ? CredentialKind.Native : CredentialKind.ApiKey,
                         ApiKey = api ? (await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false)).TrimEnd('\r', '\n') : "",
-                        Executable = Option(args, "--executable") ?? ""
+                        Executable = Option(args, "--executable") ?? "", MuxEndpointsFile = Option(args, "--endpoints-file") ?? ""
                     });
                     Console.WriteLine(created.Id);
                     return 0;
@@ -61,6 +61,7 @@ namespace Kameo.Cli
                     Profile edit = store.Get(args[1]);
                     edit.Name = Option(args, "--name") ?? edit.Name;
                     edit.Executable = Option(args, "--executable") ?? edit.Executable;
+                    edit.MuxEndpointsFile = Option(args, "--endpoints-file") ?? edit.MuxEndpointsFile;
                     if (args.Contains("--api-key-stdin", StringComparer.Ordinal)) edit.ApiKey = (await Console.In.ReadToEndAsync(cancellationToken).ConfigureAwait(false)).TrimEnd('\r', '\n');
                     store.Update(edit);
                     return 0;
@@ -76,7 +77,7 @@ namespace Kameo.Cli
                 case "run":
                     Require(args, 2);
                     return await new LaunchService(store).RunAsync(store.Selected(HarnessCatalog.Parse(args[1])).Id, Tail(args, 2), false, cancellationToken).ConfigureAwait(false);
-                case "claude": case "codex": case "gemini": case "mux":
+                case "claude": case "codex": case "antigravity": case "agy": case "gemini": case "mux":
                     return await new LaunchService(store).RunAsync(store.Selected(HarnessCatalog.Parse(args[0])).Id, Tail(args, 1), false, cancellationToken).ConfigureAwait(false);
                 default: throw new ArgumentException("Unknown command. Run kameo --help for usage.");
             }
@@ -100,9 +101,11 @@ namespace Kameo.Cli
             kameo [--home PATH] COMMAND
               list                                     List profiles (* = selected)
               add HARNESS NAME --native                Create an isolated native login
+                [--endpoints-file PATH]                Link a shared Mux endpoints file
               add HARNESS NAME --api-key-stdin          Read an API key from standard input
                 [--executable PATH]                    Override the harness executable
               edit ID [--name NAME] [--executable PATH] [--api-key-stdin]
+                [--endpoints-file PATH]                Link a shared Mux endpoints file (native profiles)
               select ID                                Select for the next invocation
               delete ID                                Delete profile and stored native data
               import ID FILE                           Import native credential JSON
@@ -111,10 +114,10 @@ namespace Kameo.Cli
               mux-config ID ADAPTER URL MODEL          Configure a Mux API-key endpoint
               run HARNESS -- [ARGS...]                 Launch the selected profile
               run-profile ID -- [ARGS...]              Launch a specific profile
-              claude|codex|gemini|mux [ARGS...]          Shorthand for run
+              claude|codex|antigravity|mux [ARGS...]     Shorthand for run (Antigravity launches agy)
 
             API keys never go in command arguments. Pass them through stdin or the desktop editor.
-            Gemini opens its interactive login screen; Mux opens its endpoint setup wizard.
+            Antigravity uses API-key profiles only; Mux opens its endpoint setup wizard.
             Run with --device-auth only for Codex. Harnesses must already be installed.
             """);
     }

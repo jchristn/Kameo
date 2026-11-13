@@ -8,6 +8,7 @@ namespace Kameo.Core
         private string _Name = "New profile";
         private string _ApiKey = "";
         private string _Executable = "";
+        private string _MuxEndpointsFile = "";
 
         /// <summary>Opaque stable identifier, generated on creation.</summary>
         public string Id { get; internal set; } = "";
@@ -33,6 +34,8 @@ namespace Kameo.Core
         public string ApiKey { get => _ApiKey; set => _ApiKey = value ?? throw new ArgumentNullException(nameof(value)); }
         /// <summary>Optional executable name or absolute path. Empty uses the harness command on PATH.</summary>
         public string Executable { get => _Executable; set => _Executable = value ?? throw new ArgumentNullException(nameof(value)); }
+        /// <summary>Optional shared Mux endpoints file. Read afresh for each launch; never modified by Kameo.</summary>
+        public string MuxEndpointsFile { get => _MuxEndpointsFile; set => _MuxEndpointsFile = value ?? throw new ArgumentNullException(nameof(value)); }
         /// <summary>Creation timestamp in UTC.</summary>
         public DateTimeOffset CreatedUtc { get; internal set; }
         /// <summary>Whether this is the selected profile for its harness.</summary>

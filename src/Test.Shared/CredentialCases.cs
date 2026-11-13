@@ -13,7 +13,7 @@ namespace Test.Shared
         {
             HarnessKind.Claude => "{\"claudeAiOauth\":{\"accessToken\":\"synthetic-access\",\"refreshToken\":\"synthetic-refresh\",\"expiresAt\":1900000000000}}",
             HarnessKind.Codex => "{\"tokens\":{\"access_token\":\"synthetic-access\",\"refresh_token\":\"synthetic-refresh\",\"id_token\":\"synthetic-id\"}}",
-            HarnessKind.Gemini => "{\"refresh_token\":\"synthetic-refresh\",\"access_token\":\"synthetic-access\"}",
+            HarnessKind.Antigravity => "{\"refresh_token\":\"synthetic-refresh\",\"access_token\":\"synthetic-access\"}",
             HarnessKind.Mux => "{\"endpoints\":[{\"name\":\"test\",\"adapterType\":\"openai\",\"model\":\"test-model\",\"apiKey\":\"synthetic-key\"}]}",
             _ => throw new ArgumentOutOfRangeException(nameof(harness))
         };
@@ -24,6 +24,7 @@ namespace Test.Shared
             void Add(string name, Action<Fixture> execute) => cases.Add(KameoSuites.Case("Credentials", name, execute));
             foreach (HarnessKind harness in HarnessCatalog.All)
             {
+                if (!HarnessCatalog.SupportsNativeLogin(harness)) continue;
                 Add("Import" + harness, fixture =>
                 {
                     Profile profile = fixture.Add(harness, kind: CredentialKind.Native);
@@ -57,7 +58,7 @@ namespace Test.Shared
             Add("DifferentProfileIsUnaffected", fixture => { Profile first = fixture.Add(kind: CredentialKind.Native); Profile second = fixture.Add(name: "Other", kind: CredentialKind.Native); new CredentialFiles(fixture.Store).ImportText(first.Id, Document(HarnessKind.Codex)); Fixture.Check(!fixture.Store.Get(second.Id).HasNativeCredential, "Import crossed profile boundaries."); });
             Add("CodexApiFileAccepted", fixture => CredentialFiles.Validate(HarnessKind.Codex, "{\"OPENAI_API_KEY\":\"synthetic\"}"));
             Add("MissingRefreshRejected", fixture => Fixture.Throws<InvalidDataException>(() => CredentialFiles.Validate(HarnessKind.Claude, "{\"claudeAiOauth\":{\"accessToken\":\"test\"}}")));
-            Add("WrongTokenTypeRejected", fixture => Fixture.Throws<InvalidDataException>(() => CredentialFiles.Validate(HarnessKind.Gemini, "{\"refresh_token\":123}")));
+            Add("WrongTokenTypeRejected", fixture => Fixture.Throws<InvalidDataException>(() => CredentialFiles.Validate(HarnessKind.Codex, "{\"tokens\":{\"access_token\":123,\"refresh_token\":123}}")));
             Add("MuxEmptyEndpointsRejected", fixture => Fixture.Throws<InvalidDataException>(() => CredentialFiles.Validate(HarnessKind.Mux, "{\"endpoints\":[]}")));
             Add("MuxEnvironmentCredentialCapture", fixture =>
             {

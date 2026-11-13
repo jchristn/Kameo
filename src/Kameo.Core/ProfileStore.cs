@@ -36,10 +36,17 @@ namespace Kameo.Core
             using SqliteConnection connection = Open();
             using SqliteCommand command = connection.CreateCommand();
             command.CommandText = "PRAGMA user_version;";
-            if (Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) > 1)
+            int schemaVersion = Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+            if (schemaVersion > 2)
                 throw new InvalidDataException("This Kameo database was created by a newer version. Update Kameo before opening it.");
+            command.CommandText = "PRAGMA journal_mode=DELETE;";
+            command.ExecuteNonQuery();
+            using SqliteTransaction schemaTransaction = connection.BeginTransaction();
+            command.Transaction = schemaTransaction;
+            command.CommandText = "PRAGMA user_version;";
+            schemaVersion = Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+            if (schemaVersion > 2) throw new InvalidDataException("This Kameo database was created by a newer version. Update Kameo before opening it.");
             command.CommandText = """
-                PRAGMA journal_mode=DELETE;
                 CREATE TABLE IF NOT EXISTS profiles (
                     id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE,
                     harness INTEGER NOT NULL CHECK(harness BETWEEN 0 AND 3),
@@ -50,9 +57,14 @@ namespace Kameo.Core
                     harness INTEGER PRIMARY KEY, profile_id TEXT NOT NULL,
                     FOREIGN KEY(harness, profile_id) REFERENCES profiles(harness, id) ON DELETE CASCADE);
                 CREATE TABLE IF NOT EXISTS preferences (name TEXT PRIMARY KEY, value TEXT NOT NULL);
-                PRAGMA user_version=1;
                 """;
             command.ExecuteNonQuery();
+            if (schemaVersion < 2)
+            {
+                command.CommandText = "ALTER TABLE profiles ADD COLUMN mux_endpoints_file TEXT NOT NULL DEFAULT ''; PRAGMA user_version=2;";
+                command.ExecuteNonQuery();
+            }
+            schemaTransaction.Commit();
         }
 
         /// <summary>Returns independent profile snapshots, without secret values unless explicitly requested.</summary>
@@ -60,7 +72,7 @@ namespace Kameo.Core
         {
             using SqliteConnection connection = Open();
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "SELECT p.id,p.name,p.harness,p.kind," + (includeSecrets ? "p.api_key" : "''") + ",p.executable,p.created_utc,s.profile_id IS NOT NULL FROM profiles p LEFT JOIN selections s ON s.profile_id=p.id ORDER BY p.harness,p.name COLLATE NOCASE;";
+            command.CommandText = "SELECT p.id,p.name,p.harness,p.kind," + (includeSecrets ? "p.api_key" : "''") + ",p.executable,p.created_utc,s.profile_id IS NOT NULL,p.mux_endpoints_file FROM profiles p LEFT JOIN selections s ON s.profile_id=p.id ORDER BY p.harness,p.name COLLATE NOCASE;";
             using SqliteDataReader reader = command.ExecuteReader();
             List<Profile> profiles = new List<Profile>();
             while (reader.Read())
@@ -69,9 +81,10 @@ namespace Kameo.Core
                 {
                     Id = reader.GetString(0), Name = reader.GetString(1), Harness = (HarnessKind)reader.GetInt32(2),
                     Kind = (CredentialKind)reader.GetInt32(3), ApiKey = reader.GetString(4), Executable = reader.GetString(5),
-                    CreatedUtc = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture), IsActive = reader.GetBoolean(7)
+                    CreatedUtc = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture), IsActive = reader.GetBoolean(7), MuxEndpointsFile = reader.GetString(8)
                 };
-                profile.HasNativeCredential = File.Exists(Path.Combine(ProfileDirectory(profile.Id), HarnessCatalog.CredentialFile(profile.Harness)));
+                profile.HasNativeCredential = profile.MuxEndpointsFile.Length > 0 ? File.Exists(profile.MuxEndpointsFile)
+                    : File.Exists(Path.Combine(ProfileDirectory(profile.Id), HarnessCatalog.CredentialFile(profile.Harness)));
                 profiles.Add(profile);
             }
             return profiles;
@@ -95,6 +108,8 @@ namespace Kameo.Core
         public Profile Create(Profile profile)
         {
             ArgumentNullException.ThrowIfNull(profile);
+            if (profile.Kind == CredentialKind.Native && !HarnessCatalog.SupportsNativeLogin(profile.Harness))
+                throw new InvalidOperationException("Antigravity supports API-key profiles only in Kameo. Use a Gemini API key from Google AI Studio.");
             Validate(profile);
             string id = new PrettyId.IdGenerator().GenerateKSortable("prf_", 24);
             string directory = ProfileDirectory(id);
@@ -105,7 +120,7 @@ namespace Kameo.Core
                 using SqliteTransaction transaction = connection.BeginTransaction();
                 using SqliteCommand command = connection.CreateCommand();
                 command.Transaction = transaction;
-                command.CommandText = "INSERT INTO profiles VALUES($id,$name,$harness,$kind,$key,$exe,$created); INSERT OR IGNORE INTO selections VALUES($harness,$id);";
+                command.CommandText = "INSERT INTO profiles(id,name,harness,kind,api_key,executable,created_utc,mux_endpoints_file) VALUES($id,$name,$harness,$kind,$key,$exe,$created,$muxFile); INSERT OR IGNORE INTO selections VALUES($harness,$id);";
                 AddParameters(command, profile);
                 command.Parameters.AddWithValue("$id", id);
                 command.Parameters.AddWithValue("$created", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
@@ -131,7 +146,7 @@ namespace Kameo.Core
                 throw new ArgumentException("Create a new profile to change its harness or authentication method.", nameof(profile));
             using SqliteConnection connection = Open();
             using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = "UPDATE profiles SET name=$name,api_key=$key,executable=$exe WHERE id=$id;";
+            command.CommandText = "UPDATE profiles SET name=$name,api_key=$key,executable=$exe,mux_endpoints_file=$muxFile WHERE id=$id;";
             AddParameters(command, profile);
             command.Parameters.AddWithValue("$id", profile.Id);
             try { command.ExecuteNonQuery(); }
@@ -231,13 +246,19 @@ namespace Kameo.Core
                 throw new ArgumentException("Invalid profile identifier.", nameof(id));
         }
 
-        private static void Validate(Profile profile)
+        private void Validate(Profile profile)
         {
             if (!Enum.IsDefined(profile.Harness) || !Enum.IsDefined(profile.Kind)) throw new ArgumentException("Unsupported harness or credential type.");
             if (profile.Kind == CredentialKind.ApiKey && string.IsNullOrWhiteSpace(profile.ApiKey)) throw new ArgumentException("An API key is required.");
             if (profile.ApiKey.Any(char.IsControl) || profile.ApiKey.Length > 65536) throw new ArgumentException("The API key contains invalid characters or is too long.");
             if (profile.Executable.Any(char.IsControl)) throw new ArgumentException("The executable contains invalid characters.");
             if (profile.Kind == CredentialKind.Native && profile.ApiKey.Length > 0) throw new ArgumentException("Native profiles cannot contain an API key.");
+            if (profile.MuxEndpointsFile.Length > 0)
+            {
+                if (profile.Harness != HarnessKind.Mux || profile.Kind != CredentialKind.Native)
+                    throw new ArgumentException("A shared endpoints file requires a Mux endpoints-file profile.");
+                profile.MuxEndpointsFile = MuxEndpointLink.Validate(Root, profile.MuxEndpointsFile);
+            }
         }
 
         private static void AddParameters(SqliteCommand command, Profile profile)
@@ -247,6 +268,7 @@ namespace Kameo.Core
             command.Parameters.AddWithValue("$kind", (int)profile.Kind);
             command.Parameters.AddWithValue("$key", profile.ApiKey);
             command.Parameters.AddWithValue("$exe", profile.Executable);
+            command.Parameters.AddWithValue("$muxFile", profile.MuxEndpointsFile);
         }
     }
 }

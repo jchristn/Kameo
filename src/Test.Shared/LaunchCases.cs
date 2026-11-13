@@ -26,16 +26,16 @@ namespace Test.Shared
                     ProcessStartInfo start = new LaunchService(fixture.Store).Prepare(profile, new[] { "space value", "$(literal)", "a\"b", "" }).StartInfo;
                     Fixture.Check(!start.UseShellExecute, "Must not invoke a shell.");
                     Fixture.Check(start.ArgumentList.TakeLast(4).SequenceEqual(new[] { "space value", "$(literal)", "a\"b", "" }), "Arguments were reinterpreted.");
-                    string variable = harness switch { HarnessKind.Claude => "ANTHROPIC_API_KEY", HarnessKind.Codex => "OPENAI_API_KEY", HarnessKind.Gemini => "GEMINI_API_KEY", _ => "KAMEO_MUX_API_KEY" };
+                    string variable = harness switch { HarnessKind.Claude => "ANTHROPIC_API_KEY", HarnessKind.Codex => "OPENAI_API_KEY", HarnessKind.Antigravity => "GEMINI_API_KEY", _ => "KAMEO_MUX_API_KEY" };
                     Fixture.Check(start.Environment[variable] == profile.ApiKey, "Selected key missing.");
                     Fixture.Check(!start.ArgumentList.Any(argument => argument.Contains(profile.ApiKey, StringComparison.Ordinal)), "Key appears in argv.");
                     Fixture.Check(start.Environment["KAMEO_PROFILE_ID"] == profile.Id, "Wrong profile identifier.");
                 });
-                Add("NativeLogin" + harness, fixture =>
+                if (HarnessCatalog.SupportsNativeLogin(harness)) Add("NativeLogin" + harness, fixture =>
                 {
                     Profile profile = fixture.Add(harness, kind: CredentialKind.Native);
                     ProcessStartInfo start = new LaunchService(fixture.Store).Prepare(profile, Array.Empty<string>(), true).StartInfo;
-                    string variable = harness switch { HarnessKind.Claude => "CLAUDE_CONFIG_DIR", HarnessKind.Codex => "CODEX_HOME", HarnessKind.Gemini => "GEMINI_CLI_HOME", _ => "MUX_CONFIG_DIR" };
+                    string variable = harness switch { HarnessKind.Claude => "CLAUDE_CONFIG_DIR", HarnessKind.Codex => "CODEX_HOME", _ => "MUX_CONFIG_DIR" };
                     Fixture.Check(start.Environment[variable] == fixture.Store.ProfileDirectory(profile.Id), "Native directory not isolated.");
                     if (harness == HarnessKind.Claude) Fixture.Check(start.ArgumentList.SequenceEqual(new[] { "auth", "login" }), "Claude login command incorrect.");
                     if (harness == HarnessKind.Codex) Fixture.Check(start.ArgumentList.Contains("login") && start.ArgumentList.Contains("cli_auth_credentials_store=\"file\""), "Codex file auth missing.");
@@ -58,13 +58,29 @@ namespace Test.Shared
                 new LaunchService(fixture.Store).Prepare(fixture.Add(), Array.Empty<string>());
                 Fixture.Check(Environment.GetEnvironmentVariable("CODEX_HOME") == before, "Launcher changed parent environment.");
             });
-            Add("GeminiNestedHomeAndAuthType", fixture =>
+            Add("AntigravityDirectoryAndApiProvider", fixture =>
             {
-                Profile profile = fixture.Add(HarnessKind.Gemini);
+                Profile profile = fixture.Add(HarnessKind.Antigravity);
                 ProcessStartInfo start = new LaunchService(fixture.Store).Prepare(profile, Array.Empty<string>()).StartInfo;
-                string path = Path.Combine(fixture.Store.ProfileDirectory(profile.Id), ".gemini", "settings.json");
-                Fixture.Check(JsonNode.Parse(File.ReadAllText(path))?["security"]?["auth"]?["selectedType"]?.GetValue<string>() == "gemini-api-key", "Wrong Gemini auth type.");
-                Fixture.Check(start.Environment["GEMINI_FORCE_ENCRYPTED_FILE_STORAGE"] == "false", "Gemini must use the profile file.");
+                string directory = fixture.Store.ProfileDirectory(profile.Id);
+                string path = Path.Combine(directory, "antigravity-cli", "settings.json");
+                Fixture.Check(start.FileName == "agy", "Antigravity must launch agy, not the retired gemini command.");
+                Fixture.Check(JsonNode.Parse(File.ReadAllText(path))?["modelProvider"]?.GetValue<string>() == "gemini", "The Gemini API provider was not enabled.");
+                Fixture.Check(start.ArgumentList.SequenceEqual(new[] { "--gemini_dir", directory, "--settings", "{\"modelProvider\":\"gemini\"}" }), "Antigravity profile configuration is not enforced.");
+                Fixture.Check(!start.Environment.ContainsKey("GEMINI_CLI_HOME"), "Legacy Gemini configuration leaked into Antigravity.");
+            });
+            Add("AntigravityCommandAliases", fixture =>
+            {
+                foreach (string name in new[] { "antigravity", "agy", "gemini" }) Fixture.Check(HarnessCatalog.Parse(name) == HarnessKind.Antigravity, "Antigravity alias was not recognized.");
+                Fixture.Check(HarnessCatalog.Command(HarnessKind.Antigravity) == "antigravity", "Wrapper command should use the current product name.");
+            });
+            Add("AntigravityNativeCreationRejected", fixture => Fixture.Throws<InvalidOperationException>(() => fixture.Add(HarnessKind.Antigravity, kind: CredentialKind.Native)));
+            Add("AntigravityNativeImportRejected", fixture => Fixture.Throws<InvalidOperationException>(() => CredentialFiles.Validate(HarnessKind.Antigravity, "{\"refresh_token\":\"legacy\"}")));
+            Add("AntigravityIsolationOverridesRejected", fixture =>
+            {
+                Profile profile = fixture.Add(HarnessKind.Antigravity);
+                foreach (string argument in new[] { "--gemini_dir=elsewhere", "--gemini-dir", "-gemini_dir", "--settings={}", "--remote-agent", "--flagfile=outside" })
+                    Fixture.Throws<ArgumentException>(() => new LaunchService(fixture.Store).Prepare(profile, new[] { argument }));
             });
             Add("CodexKeyRotationReplacesAuthFile", fixture =>
             {

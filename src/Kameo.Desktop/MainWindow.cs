@@ -60,7 +60,7 @@ namespace Kameo.Desktop
             Window about = new Window { Title = "About Kameo", Width = 450, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = Palette.Background };
             StackPanel content = Ui.Stack(Ui.Text("Kameo", 32, weight: FontWeight.SemiBold), Ui.Badge("0.1.0  ·  ALPHA", true),
                 Ui.Text("Your agent identities, in one place.", 16),
-                Ui.Text("A local credential and profile manager for Claude Code, Codex, Gemini CLI, and Mux.\n\nCopyright (c) 2026 Joel Christner\nMIT License", 13, Palette.Muted),
+                Ui.Text("A local credential and profile manager for Claude Code, Codex, Antigravity, and Mux.\n\nCopyright (c) 2026 Joel Christner\nMIT License", 13, Palette.Muted),
                 Ui.Button("Close", about.Close, true));
             content.Margin = new Thickness(30); about.Content = content;
             _ = about.ShowDialog(this);
@@ -196,6 +196,7 @@ namespace Kameo.Desktop
             IReadOnlyList<Profile> all = _Store.List();
             List<Profile> profiles = all.Where(profile => profile.Harness == _Harness).ToList();
             Profile? active = profiles.FirstOrDefault(profile => profile.IsActive);
+            bool canLaunch = active != null && (active.Kind == CredentialKind.ApiKey || HarnessCatalog.SupportsNativeLogin(active.Harness));
             StackPanel launch = Ui.Stack(
                 Ui.Text(active == null ? "No profile selected" : active.Name, 12, Palette.Accent, FontWeight.SemiBold),
                 Ui.Text("kameo " + HarnessCatalog.Command(_Harness), 17, weight: FontWeight.Medium));
@@ -205,13 +206,13 @@ namespace Kameo.Desktop
             {
                 if (active != null) _ = ChooseDirectoryAsync(active.Id, CancellationToken.None);
             });
-            launchIn.IsEnabled = active != null;
+            launchIn.IsEnabled = canLaunch;
             ToolTip.SetTip(launchIn, "Choose a folder for this launch without changing your saved launch folder.");
             Button launchDefault = Ui.Button("Launch", () =>
             {
                 if (active != null) RunAction(() => _OpenTerminal(active.Id, false, _Workspace));
             }, true);
-            launchDefault.IsEnabled = active != null;
+            launchDefault.IsEnabled = canLaunch;
             StackPanel commandActions = Ui.Row(Ui.Button("Copy", () => _ = CopyAsync(CancellationToken.None)), launchIn, launchDefault);
             commandActions.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(commandActions, 1); command.Children.Add(commandActions);
@@ -232,12 +233,15 @@ namespace Kameo.Desktop
                 heading.Children.Add(Ui.Text(profile.Name, 16, weight: FontWeight.SemiBold));
                 Border badge = Ui.Badge(profile.IsActive ? "SELECTED" : profile.Kind == CredentialKind.ApiKey ? "API KEY" : "NATIVE LOGIN", profile.IsActive);
                 Grid.SetColumn(badge, 1); heading.Children.Add(badge);
-                string description = profile.Kind == CredentialKind.ApiKey ? "API key" : profile.HasNativeCredential ? "Native login saved" : "Sign in or import a login";
+                string description = profile.Kind == CredentialKind.Native && !HarnessCatalog.SupportsNativeLogin(profile.Harness)
+                    ? "Previous Gemini login preserved. Add an Antigravity API-key profile to launch."
+                    : profile.MuxEndpointsFile.Length > 0 ? "Shared endpoints: " + Path.GetFileName(profile.MuxEndpointsFile)
+                    : profile.Kind == CredentialKind.ApiKey ? "API key" : profile.HasNativeCredential ? "Native login saved" : "Sign in or import a login";
                 StackPanel actions = Ui.Row(
                     Ui.Button(profile.IsActive ? "Selected" : "Use profile", () => RunAction(() => { _Store.Select(profile.Id); Refresh(); _Changed(); }), !profile.IsActive),
                     Ui.Button("Edit", () => _ = EditAsync(profile.Id, CancellationToken.None)));
                 actions.Children[0].IsEnabled = !profile.IsActive;
-                if (profile.Kind == CredentialKind.Native)
+                if (profile.Kind == CredentialKind.Native && profile.MuxEndpointsFile.Length == 0 && HarnessCatalog.SupportsNativeLogin(profile.Harness))
                 {
                     actions.Children.Add(Ui.Button(profile.Harness == HarnessKind.Mux ? "Setup" : "Sign in", () => RunAction(() => _OpenTerminal(profile.Id, true, _Workspace))));
                     actions.Children.Add(Ui.Button("Import...", () => _ = ImportAsync(profile.Id, CancellationToken.None)));
@@ -339,6 +343,6 @@ namespace Kameo.Desktop
             catch (Exception error) when (error is IOException or InvalidDataException or InvalidOperationException or ArgumentException or UnauthorizedAccessException or KeyNotFoundException or System.ComponentModel.Win32Exception) { Report(error.Message); }
         }
 
-        private static string Fingerprint(IReadOnlyList<Profile> profiles) => string.Join("|", profiles.Select(profile => profile.Id + profile.Name + profile.IsActive + profile.HasNativeCredential));
+        private static string Fingerprint(IReadOnlyList<Profile> profiles) => string.Join("|", profiles.Select(profile => profile.Id + profile.Name + profile.IsActive + profile.HasNativeCredential + profile.MuxEndpointsFile));
     }
 }

@@ -17,12 +17,12 @@ namespace Kameo.Core
         {
             cancellationToken.ThrowIfCancellationRequested();
             Profile profile = _Store.Get(id);
+            if (!HarnessCatalog.SupportsNativeLogin(profile.Harness)) throw new InvalidOperationException("Antigravity native-login import is not supported. Create an API-key profile instead.");
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             string sourceDirectory = profile.Harness switch
             {
                 HarnessKind.Claude => Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") ?? Path.Combine(home, ".claude"),
                 HarnessKind.Codex => Environment.GetEnvironmentVariable("CODEX_HOME") ?? Path.Combine(home, ".codex"),
-                HarnessKind.Gemini => Environment.GetEnvironmentVariable("GEMINI_CLI_HOME") ?? home,
                 HarnessKind.Mux => Environment.GetEnvironmentVariable("MUX_CONFIG_DIR") ?? Path.Combine(home, ".mux"),
                 _ => throw new ArgumentOutOfRangeException(nameof(id))
             };

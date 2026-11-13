@@ -8,6 +8,7 @@ Tests use Touchstone 1.0.0 and synthetic credentials. Every fixture owns a tempo
 - **Credentials:** every native format, failed-import preservation, input bounds, malformed JSON redaction, unsupported shapes, profile isolation, Mux endpoint validation, file atomicity, links and broken links, scoped Keychain naming.
 - **Launch:** every harness in API/native mode, stable per-profile paths, inherited key removal, literal argv boundaries, key rotation, native login commands, override rejection, executable resolution, real child environment and exit status, cancellation and lease release.
 - **CLI:** real command execution, profile CRUD and selection, stdin keys, redacted listing and import failures, unknown commands, and child exit codes.
+- **Shared Mux endpoints and migration:** persisted links, multiple profiles sharing a file, refresh on launch, missing/invalid sources, deletion preserving the source, lease enforcement, schema upgrades, and retained legacy Gemini login data. Antigravity tests cover executable selection, API-provider settings, compatibility aliases, and rejection of unsupported native authentication and configuration overrides.
 - **Lifecycle:** startup registration round trips for all five platform directories, existing shell configuration preservation, idempotence, desktop singleton leases, and graceful stop handshake.
 
 Run all shared descriptors through each required host:

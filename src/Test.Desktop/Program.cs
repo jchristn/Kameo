@@ -171,6 +171,38 @@ namespace Test.Desktop
                 Click(ocean);
                 Check(store.Preference("theme") == "light" && store.Preference("palette") == "ocean", "Palette selection was not saved.");
             });
+            Add("MuxSharedFileCanBeChosenWhenCreatingProfile", (window, store) =>
+            {
+                string source = Path.Combine(store.Root, "Shared endpoints.json");
+                File.WriteAllText(source, "{\"endpoints\":[{\"name\":\"shared\",\"adapterType\":\"openai\",\"model\":\"synthetic-model\"}]}");
+                Navigate(window, "Mux"); Click(Button(window, "+  Add profile")); Window editor = window.OwnedWindows.Single();
+                editor.GetVisualDescendants().OfType<ComboBox>().Single(box => box.Name == "AuthenticationKind").SelectedIndex = 1;
+                Field(editor, "ProfileName").Text = "Shared Mux"; Field(editor, "MuxEndpointsFile").Text = source;
+                Check(Button(editor, "Browse endpoints...").IsEffectivelyVisible, "The endpoints file picker is not visible for a Mux file profile.");
+                Click(Button(editor, "Save profile")); window.Refresh();
+                Check(store.Selected(HarnessKind.Mux).MuxEndpointsFile == source, "The editor did not persist the shared endpoints file.");
+                Check(Text(window).Contains("Shared endpoints: Shared endpoints.json", StringComparison.Ordinal), "The linked source is not shown on the profile card.");
+                Check(!window.GetVisualDescendants().OfType<Button>().Any(button => button.Content as string == "Setup"), "Shared profiles should not offer setup that edits only the temporary copy.");
+            });
+            Add("MuxInvalidFileEditPreservesProfile", (window, store) =>
+            {
+                Profile profile = store.Create(new Profile { Harness = HarnessKind.Mux, Kind = CredentialKind.Native, Name = "Original" });
+                string source = Path.Combine(store.Root, "invalid.json"); File.WriteAllText(source, "{}");
+                Navigate(window, "Mux"); Click(Button(window, "Edit")); Window editor = window.OwnedWindows.Single();
+                Field(editor, "ProfileName").Text = "Changed"; Field(editor, "MuxEndpointsFile").Text = source;
+                Click(Button(editor, "Save profile"));
+                Check(store.Get(profile.Id).Name == "Original" && store.Get(profile.Id).MuxEndpointsFile == "", "Invalid shared file caused a partial profile update.");
+                Check(Text(editor).Contains("valid Mux credentials", StringComparison.Ordinal), "Invalid file error is missing.");
+            });
+            Add("AntigravityEditorOffersApiKeysOnly", (window, store) =>
+            {
+                Navigate(window, "Antigravity"); Click(Button(window, "+  Add profile")); Window editor = window.OwnedWindows.Single();
+                ComboBox authentication = editor.GetVisualDescendants().OfType<ComboBox>().Single(box => box.Name == "AuthenticationKind");
+                Check(authentication.ItemCount == 1 && authentication.SelectedIndex == 0, "Antigravity offers an unsupported native login.");
+                Field(editor, "ProfileName").Text = "Google API"; Field(editor, "ApiKey").Text = "synthetic-google-key";
+                Click(Button(editor, "Save profile")); window.Refresh();
+                Check(store.Selected(HarnessKind.Antigravity).Kind == CredentialKind.ApiKey && Text(window).Contains("kameo antigravity", StringComparison.Ordinal), "Antigravity API profile did not produce the current wrapper command.");
+            });
             return await ConsoleRunner.RunMainAsync(new[] { new TestSuiteDescriptor("Desktop", "Desktop workflows and native menu contracts", cases) }, args).ConfigureAwait(false);
         }
 
@@ -191,6 +223,7 @@ namespace Test.Desktop
         }
 
         private static Button Button(Window window, string label) { Sync(window); return window.GetVisualDescendants().OfType<Button>().Single(button => button.Content as string == label); }
+        private static void Navigate(MainWindow window, string harness) => Click(window.GetVisualDescendants().OfType<Button>().Single(button => button.Content is Grid grid && grid.Children.OfType<TextBlock>().Any(text => text.Text == harness)));
         private static TextBox Field(Window window, string name) { Sync(window); return window.GetVisualDescendants().OfType<TextBox>().Single(field => field.Name == name); }
         private static string Text(Window window) { Sync(window); return string.Join("\n", window.GetVisualDescendants().OfType<TextBlock>().Select(text => text.Text)); }
         private static void Sync(Window window) { window.UpdateLayout(); Dispatcher.UIThread.RunJobs(); window.UpdateLayout(); }

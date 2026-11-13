@@ -16,7 +16,7 @@ There is no HTTP server, remote account service, database server, or web dashboa
 
 ## Storage and concurrency
 
-`kameo.db` contains typed columns for profile identity, harness, authentication kind, API key, executable override, creation time, selected profile per harness, and non-secret preferences. Foreign keys prevent selecting a profile belonging to another harness. Case-insensitive unique names are scoped to each harness. PrettyId supplies stable prefixed K-sortable IDs.
+`kameo.db` contains typed columns for profile identity, harness, authentication kind, API key, executable override, shared Mux endpoints-file path, creation time, selected profile per harness, and non-secret preferences. Schema version 2 adds `mux_endpoints_file` transactionally with an empty default, preserving existing rows and selections. Foreign keys prevent selecting a profile belonging to another harness. Case-insensitive unique names are scoped to each harness. PrettyId supplies stable prefixed K-sortable IDs.
 
 Connections are short-lived and independent; operations use SQL parameters and transactions. Reads return detached snapshots and redact keys by default. Native profile directories are stable across invocations. Profile leases serialize launches and prevent edits, imports, and deletion while a process owns its profile. Selection is independent of those leases.
 
@@ -38,17 +38,21 @@ The service naming contract is `Claude Code-credentials-` plus the first eight l
 
 Set `CODEX_HOME` and pass `-c cli_auth_credentials_store="file"`. API profiles write their key into the profile's `auth.json`; native profiles retain the CLI's renewable login document. Browser login invokes `codex login`, with optional `--device-auth` forwarded by the CLI. No third-party OAuth implementation is involved. [Official authentication documentation](https://developers.openai.com/codex/auth/) describes the file store and native refresh behavior.
 
-### Gemini CLI
+### Antigravity
 
-`GEMINI_CLI_HOME` is the parent of `.gemini`, not `.gemini` itself. Kameo explicitly chooses `gemini-api-key` or `oauth-personal` in profile-local settings. It supplies `GEMINI_API_KEY` for API profiles, sets `GEMINI_FORCE_FILE_STORAGE=true`, and sets `GEMINI_FORCE_ENCRYPTED_FILE_STORAGE=false` so OAuth uses the profile's `oauth_creds.json`. Native login starts the interactive Gemini CLI.
+`kameo antigravity` invokes `agy`, with `--gemini_dir` pointing to the profile directory and `--settings {"modelProvider":"gemini"}` enforcing API-key mode. Profile-local `antigravity-cli/settings.json` also persists that provider while retaining other settings. The selected key is supplied through `GEMINI_API_KEY`, never arguments. Configuration overrides that would replace the profile directory or provider are rejected.
 
-References: [configuration](https://geminicli.com/docs/reference/configuration/), [authentication](https://geminicli.com/docs/get-started/authentication/), and upstream [OAuth storage implementation](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/oauth2.ts). Kameo does not decrypt or export Gemini's OS-only or encrypted credential stores; import a native credential export or create a new isolated login.
+The [official installation/authentication guide](https://antigravity.google/docs/cli/install) documents API-key mode and the shared native keyring. The `--gemini_dir` flag is an internal CLI option, not a documented stable public contract: its registration and directory handling were inspected in the official, SHA-512-verified macOS arm64 CLI 1.5.7 binary, and that binary accepted both flags with `--help`. The inspected backend resolves the OAuth store through a fixed native keyring service, so changing directories alone does not establish native account isolation. Kameo therefore supports API keys only, as requested for this migration. No real provider login or billable request was used for verification. Future Antigravity updates may require integration changes.
+
+The enum retains numeric value 2 for Antigravity, preserving existing Gemini metadata and API keys. Legacy native-profile data at `.gemini/oauth_creds.json` is retained but cannot be launched or imported as Antigravity authentication. New native Antigravity profiles are rejected. CLI names `gemini` and `agy` remain aliases for the new wrapper command.
 
 ### Mux
 
 The reference is the local `~/Code/Mux` implementation: `SettingsLoader.GetConfigDirectory`, `EndpointConfig`, `docs/CONFIG.md`, and CLI dispatch. Kameo supplies `MUX_CONFIG_DIR`. Imported native profiles preserve `endpoints.json`, resolving API-key and header environment references at import time so the saved identity is independent of the importing shell. API profiles store a selected adapter, base URL, and model in that native file, with `${KAMEO_MUX_API_KEY}` resolved only in the child environment.
 
 Mux has no standalone OAuth or `setup` CLI command. Starting its normal interactive TUI invokes the first-run wizard; setup remains available through its F1 command menu. Kameo does not submit the word `setup` as an agent prompt. Mux's current adapters determine which authentication methods are available.
+
+Mux file profiles can instead persist a shared source path in `mux_endpoints_file`. Before each launch, under the profile lease, Kameo validates and resolves that file into the profile's local `endpoints.json`. Source changes affect future launches; no writes or deletions propagate to the shared source. This accommodates arbitrary filenames without changing Mux, which loads `endpoints.json` from its config directory. Links to managed Kameo profile files are rejected. An invalid or missing source fails the launch while preserving the previous snapshot. Clearing the link restores local setup/import behavior. Shared-file environment references resolve at launch time, while one-time imports resolve at import time.
 
 ## Desktop
 
