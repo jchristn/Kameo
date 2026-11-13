@@ -22,6 +22,18 @@ Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. I
 - Plaintext local storage under `~/.kameo/`, with owner-only Unix permissions.
 - No account, hosted service, or credential synchronization required.
 
+## Screenshots
+
+Captured on macOS with sample profiles. Click an image to view it at full size.
+
+| Profile manager · Ocean dark | Profile manager · Seafoam light |
+| --- | --- |
+| [![Kameo in Ocean dark mode with Work and Personal profiles and launch controls](docs/screenshots/profiles-dark.jpg)](docs/screenshots/profiles-dark.jpg) | [![Kameo in Seafoam light mode with Work and Personal profiles and launch controls](docs/screenshots/profiles-light.jpg)](docs/screenshots/profiles-light.jpg) |
+
+| Appearance · 16 palettes in light and dark | About · also used for the startup splash |
+| --- | --- |
+| [![Appearance picker showing all sixteen palettes and light and dark mode controls](docs/screenshots/appearance.jpg)](docs/screenshots/appearance.jpg) | [![About Kameo with the contrasting logo, alpha version, GitHub link, copyright, and MIT license](docs/screenshots/about.jpg)](docs/screenshots/about.jpg) |
+
 ## Getting started
 
 ### Install from source
