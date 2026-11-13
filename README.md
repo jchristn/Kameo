@@ -20,7 +20,9 @@ Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. I
 - Plaintext local storage under `~/.kameo/`, with owner-only Unix permissions.
 - No account, hosted service, or credential synchronization required.
 
-## Install from source
+## Getting started
+
+### Install from source
 
 Install Git, the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and whichever harnesses you want to use. Kameo does not install the harnesses. Their commands must be on `PATH`, or you can set an executable path in each profile.
 
@@ -45,11 +47,43 @@ The build writes the CLI to `artifacts/cli/` and the desktop to `artifacts/deskt
 
 Linux needs a graphical desktop with X11 or an appropriate compatibility layer, fontconfig, and a terminal such as `xterm`, `gnome-terminal`, or `konsole`. Tray support depends on the desktop's StatusNotifier/AppIndicator support. The manager remains available without a tray host; closing its window on Linux exits Kameo. On Windows and macOS, closing the manager keeps Kameo in the tray. Quit from the tray or native application menu.
 
+Once Kameo opens, [add your first profile](#add-your-first-profile), select it, and launch your harness. To enable automatic startup, run `scripts\windows\run-at-startup.bat` on Windows or `./scripts/<platform>/run-at-startup.sh` on macOS, Linux, WSL, or WSL2, replacing `<platform>` with the directory name from the table. This is optional and applies only to your user account.
+
 ### Windows and WSL
 
 Install Kameo in Windows **or inside a WSL distribution**, using the corresponding SDK, harness executables, and scripts. Each installation uses its own home directory and profiles. Kameo does not bridge Windows credentials into WSL.
 
 WSL2 can use WSLg or an external X server. WSL1 needs an external X server. WSLg alone does not provide a conventional desktop tray, so use the manager window. The CLI works in headless WSL. WSL startup registration adds a marked block to `.bashrc` and `.zshrc`; it starts the app from an interactive shell only when a graphical display is available.
+
+### Remove Kameo by OS
+
+Close agent sessions launched through Kameo before removing it. If you want to erase saved credentials as well, delete the profiles in Kameo **before** stopping the app. On macOS, this also removes each Claude profile's scoped Keychain entry; deleting the data folder alone does not remove those entries.
+
+From the clone's root directory, run the following commands in order. Run Windows commands in Command Prompt, or prefix them with `.\` in PowerShell. If you use a custom data directory, set `KAMEO_HOME` to that directory in this shell before running the commands so the stop script targets the correct desktop instance. Keep the clone and .NET runtime available until these steps finish.
+
+| Platform | 1. Remove automatic startup | 2. Stop the desktop |
+| --- | --- | --- |
+| Windows | `scripts\windows\remove-from-startup.bat` | `scripts\windows\stop.bat` |
+| macOS | `./scripts/macos/remove-from-startup.sh` | `./scripts/macos/stop.sh` |
+| Linux | `./scripts/linux/remove-from-startup.sh` | `./scripts/linux/stop.sh` |
+| WSL | `./scripts/wsl/remove-from-startup.sh` | `./scripts/wsl/stop.sh` |
+| WSL2 | `./scripts/wsl2/remove-from-startup.sh` | `./scripts/wsl2/stop.sh` |
+
+The startup-removal script removes Kameo's Windows Startup entry, macOS LaunchAgent file, Linux autostart entry, or WSL shell hooks. It is safe to run even if automatic startup was never enabled.
+
+After both commands succeed:
+
+| Platform | Remove the application | Optional: erase remaining local data |
+| --- | --- | --- |
+| Windows | Delete the cloned `Kameo` folder in File Explorer, including `artifacts`. | Delete `%USERPROFILE%\.kameo`. |
+| macOS | Move the cloned `Kameo` folder to Trash in Finder, including `artifacts/Kameo.app`. Remove any copies of `Kameo.app` you made elsewhere. | Use Finder's **Go → Go to Folder** to open `~/.kameo`, then remove that folder. |
+| Linux | Delete the cloned `Kameo` folder with your file manager or from its parent directory in a terminal. | Delete `~/.kameo` in your Linux home directory. |
+| WSL | Delete the clone inside the WSL distribution where you installed it. | Delete `~/.kameo` inside that distribution. |
+| WSL2 | Delete the clone inside the WSL2 distribution where you installed it. | Delete `~/.kameo` inside that distribution. |
+
+Keep the data folder if you want to retain profiles and preferences for a later reinstall. Removing it deletes Kameo's saved credentials, preferences, and profile-specific harness state. If you set `KAMEO_HOME`, use that custom directory instead of the default above. Windows and WSL installations are independent; repeat removal in each environment you used.
+
+Remove any Kameo `PATH` entries, aliases, shortcuts, or symlinks you added manually. The removal steps leave your separately installed harnesses and their original credentials in place. Keep Git and .NET if other applications use them.
 
 ## Add your first profile
 
