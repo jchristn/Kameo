@@ -50,7 +50,57 @@ namespace Test.Desktop
                 return true;
             }, cancellationToken), tags: new[] { "desktop", "isolated" }));
 
-            Add("EmptyStateHasDisabledLaunch", (window, store) => Check(!Button(window, "Launch").IsEnabled && Text(window).Contains("No profiles yet", StringComparison.Ordinal), "Empty state is missing or can launch without a profile."));
+            Add("EmptyStateHasDisabledLaunch", (window, store) => Check(!Button(window, "Launch").IsEnabled && !Button(window, "Launch in...").IsEnabled && Text(window).Contains("No profiles yet", StringComparison.Ordinal), "Empty state is missing or can launch without a profile."));
+            Add("LaunchInPreservesDefaultFolder", (_, store) =>
+            {
+                string chosen = Directory.CreateDirectory(Path.Combine(store.Root, "Project with spaces")).FullName;
+                WithLaunchWindow(store, _ => Task.FromResult<string?>(chosen), (window, launches) =>
+                {
+                    Check(Button(window, "Launch in...").IsEnabled, "Launch in should be available for a selected profile.");
+                    Click(Button(window, "Launch in..."));
+                    Check(launches.SequenceEqual(new[] { chosen }), "Launch in did not use the chosen directory exactly once.");
+                    Check(store.Preference("workspace") == store.Root, "Launch in changed the saved launch folder.");
+                    Click(Button(window, "Launch"));
+                    Check(launches.SequenceEqual(new[] { chosen, store.Root }), "Normal Launch did not retain its default folder.");
+                });
+            });
+            Add("LaunchInCancelDoesNotLaunch", (_, store) => WithLaunchWindow(store, _ => Task.FromResult<string?>(null), (window, launches) =>
+            {
+                Click(Button(window, "Launch in..."));
+                Check(launches.Count == 0 && store.Preference("workspace") == store.Root, "Cancel launched a session or changed the saved folder.");
+            }));
+            Add("SidebarFolderStillUpdatesDefault", (_, store) =>
+            {
+                string chosen = Directory.CreateDirectory(Path.Combine(store.Root, "Saved project")).FullName;
+                WithLaunchWindow(store, _ => Task.FromResult<string?>(chosen), (window, launches) =>
+                {
+                    Click(Button(window, Path.GetFileName(store.Root) + "..."));
+                    Check(launches.Count == 0 && store.Preference("workspace") == chosen, "The sidebar folder picker did not save the default without launching.");
+                    Click(Button(window, "Launch"));
+                    Check(launches.SequenceEqual(new[] { chosen }), "Launch did not use the updated sidebar folder.");
+                });
+            });
+            Add("LaunchInPickerFailureIsReported", (_, store) => WithLaunchWindow(store,
+                _ => Task.FromException<string?>(new IOException("Folder picker unavailable.")), (window, launches) =>
+            {
+                Click(Button(window, "Launch in..."));
+                Check(launches.Count == 0 && Text(window).Contains("Folder picker unavailable.", StringComparison.Ordinal), "Picker failure escaped or was not reported.");
+                Check(store.Preference("workspace") == store.Root, "Picker failure changed the saved folder.");
+            }));
+            Add("LaunchInMissingFolderDoesNotLaunch", (_, store) => WithLaunchWindow(store,
+                _ => Task.FromResult<string?>(Path.Combine(store.Root, "removed-folder")), (window, launches) =>
+            {
+                Click(Button(window, "Launch in..."));
+                Check(launches.Count == 0 && Text(window).Contains("no longer available", StringComparison.Ordinal), "A missing folder was accepted or lacks a useful error.");
+                Check(store.Preference("workspace") == store.Root, "A missing folder changed the saved folder.");
+            }));
+            Add("LaunchInTerminalFailureIsReported", (_, store) => WithLaunchWindow(store,
+                _ => Task.FromResult<string?>(store.Root), (window, launches) =>
+            {
+                Click(Button(window, "Launch in..."));
+                Check(Text(window).Contains("No test terminal available.", StringComparison.Ordinal), "Terminal failure was not reported.");
+                Check(store.Preference("workspace") == store.Root, "Terminal failure changed the saved folder.");
+            }, failLaunch: true));
             Add("CompactLayoutHasNoUnwantedFooter", (window, store) => Check(window.Width <= 800 && window.Height <= 550 && !Text(window).Contains("Stored on this device", StringComparison.Ordinal) && !window.GetVisualDescendants().OfType<Button>().Any(button => button.Content as string == "Quit Kameo"), "The compact layout regressed."));
             Add("NativeMenuBarIsComplete", (window, store) =>
             {
@@ -122,6 +172,22 @@ namespace Test.Desktop
                 Check(store.Preference("theme") == "light" && store.Preference("palette") == "ocean", "Palette selection was not saved.");
             });
             return await ConsoleRunner.RunMainAsync(new[] { new TestSuiteDescriptor("Desktop", "Desktop workflows and native menu contracts", cases) }, args).ConfigureAwait(false);
+        }
+
+        private static void WithLaunchWindow(ProfileStore store, Func<CancellationToken, Task<string?>> pickFolder,
+            Action<MainWindow, List<string>> verify, bool failLaunch = false)
+        {
+            Profile profile = store.Create(new Profile { Harness = HarnessKind.Claude, Name = "Launch test", ApiKey = "synthetic" });
+            store.SetPreference("workspace", store.Root);
+            List<string> launches = new List<string>();
+            MainWindow window = new MainWindow(store, () => { }, () => { }, pickFolder, (id, login, directory) =>
+            {
+                Check(id == profile.Id && !login, "Launch in used the wrong profile or started login instead of a session.");
+                if (failLaunch) throw new InvalidOperationException("No test terminal available.");
+                launches.Add(directory);
+            });
+            try { window.Show(); Sync(window); verify(window, launches); }
+            finally { window.Close(); }
         }
 
         private static Button Button(Window window, string label) { Sync(window); return window.GetVisualDescendants().OfType<Button>().Single(button => button.Content as string == label); }

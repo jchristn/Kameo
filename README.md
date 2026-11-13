@@ -91,13 +91,45 @@ Remove any Kameo `PATH` entries, aliases, shortcuts, or symlinks you added manua
 2. Choose **API key** or **Native login / import**. For a Mux API-key profile, also choose the adapter, endpoint, and model.
 3. For native authentication, click **Sign in** to open the harness in a terminal, **Import current** to copy an existing login, or **Import...** to select a native credential JSON file. Mux's **Setup** opens its interactive TUI and first-run wizard; an existing Mux profile can use its F1 setup command.
 4. Click **Use profile** or choose the profile from the tray. The first profile for a harness is selected automatically.
-5. Click **Launch**, or use a Kameo terminal command.
+5. Click **Launch** to use the saved launch folder, **Launch in...** to choose a folder for this session only, or use a Kameo terminal command. Canceling the folder picker starts nothing; choosing a folder with **Launch in...** does not change the saved launch folder in the sidebar.
 
 The executable field accepts an executable name, absolute native executable path, or JavaScript entry point. On Windows, standard npm `.cmd` shims are resolved to their JavaScript entry points and launched with Node.js. Arbitrary batch files are rejected, so harness arguments never pass through `cmd.exe` inside Kameo.
 
 ## Launch from a terminal
 
-Add the absolute `artifacts/cli` directory to `PATH`, or invoke `scripts/common/kameo.sh` (`scripts\common\kameo.bat` on Windows).
+The platform's `update` script in [Getting started](#getting-started) builds both the GUI and the CLI. It creates `artifacts/cli/kameo` on macOS, Linux, WSL, and WSL2, or `artifacts\cli\kameo.exe` on Windows. The `start` script also builds them if they are missing. **There is no global CLI installation, and the scripts do not add `kameo` to `PATH`.**
+
+After building, you can use the CLI immediately from the clone's root without changing `PATH`:
+
+```sh
+# macOS, Linux, WSL, or WSL2
+./scripts/common/kameo.sh --version
+./scripts/common/kameo.sh codex
+```
+
+```powershell
+# Windows PowerShell (omit .\ in Command Prompt)
+.\scripts\common\kameo.bat --version
+.\scripts\common\kameo.bat codex
+```
+
+To use the shorter `kameo` command from any working directory, add the clone's **absolute** `artifacts/cli` directory to `PATH`. For the current terminal session, run the appropriate command below from the clone's root:
+
+```sh
+# macOS, Linux, WSL, or WSL2 (bash/zsh)
+export PATH="$PWD/artifacts/cli:$PATH"
+kameo --version
+```
+
+```powershell
+# Windows PowerShell
+$env:Path = (Join-Path (Get-Location).Path 'artifacts\cli') + ';' + $env:Path
+kameo --version
+```
+
+For future terminals, add the absolute directory to your shell's `PATH` configuration (for example, `~/.zshrc` or `~/.bashrc`), or to your user **Path** in Windows Environment Variables, then open a new terminal. Configure it separately inside each WSL distribution. Keep the clone at that location; update the entry if you move it.
+
+The examples below assume `PATH` is configured. Otherwise, replace `kameo` with the wrapper's path above or the absolute path to the built CLI.
 
 ```sh
 kameo claude
@@ -107,7 +139,7 @@ kameo mux
 kameo run codex -- --help
 ```
 
-These are Kameo commands; the original `claude`, `codex`, `gemini`, and `mux` commands keep their existing behavior. Wrappers preserve the current working directory, argument boundaries, and harness exit code. Desktop launches use the chosen launch folder.
+These are Kameo commands; the original `claude`, `codex`, `gemini`, and `mux` commands keep their existing behavior. Wrappers preserve the current working directory, argument boundaries, and harness exit code. Desktop **Launch** uses the saved launch folder; **Launch in...** uses the folder chosen for that invocation.
 
 ```sh
 kameo list

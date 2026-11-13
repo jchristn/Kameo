@@ -26,7 +26,7 @@ Adjust the runtime identifier and executable extension for your machine. `Test.H
 
 ## Desktop workflows
 
-`Test.Desktop` uses Touchstone descriptors and Avalonia's headless dispatcher to exercise the actual control tree. It checks the empty state, compact layout constraints, native menu inventory, harness navigation, editor validation and creation, key masking/preservation, search, selection, delete confirmation, and palette persistence.
+`Test.Desktop` uses Touchstone descriptors and Avalonia's headless dispatcher to exercise the actual control tree. It checks the empty state, compact layout constraints, native menu inventory, harness navigation, editor validation and creation, key masking/preservation, search, selection, delete confirmation, and palette persistence. Launch-in workflows inject a folder picker and terminal launcher to verify the selected profile and directory, cancellation, missing folders, picker/terminal failures, and preservation of the saved launch folder without invoking a real harness.
 
 ```sh
 dotnet run --project src/Test.Desktop -- --skip fail --results artifacts/reports/desktop.json

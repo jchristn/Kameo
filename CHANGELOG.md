@@ -6,6 +6,7 @@
 - API-key and native-login profiles for Claude Code, Codex, Gemini CLI, and Mux.
 - Isolated harness directories, renewable native credentials, explicit imports, and launch wrappers.
 - Compact profile manager, 16 coordinated palettes, light/dark modes, and native macOS menus.
+- **Launch in...** chooses a directory for one session while preserving the saved launch folder.
 - Source-build lifecycle scripts for Windows, macOS, Linux, WSL, and WSL2.
 - Shared Touchstone suites, xUnit v3, NUnit, desktop workflows, native startup smoke tests, and native AOT coverage.
 - MIT-licensed source distribution with installation, usage, troubleshooting, and issue-reporting documentation.

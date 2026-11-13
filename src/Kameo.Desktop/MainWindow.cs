@@ -22,6 +22,8 @@ namespace Kameo.Desktop
         private readonly ProfileStore _Store;
         private readonly Action _Changed;
         private readonly Action _Quit;
+        private readonly Func<CancellationToken, Task<string?>> _PickFolder;
+        private readonly Action<string, bool, string> _OpenTerminal;
         private HarnessKind _Harness = HarnessKind.Claude;
         private TextBox? _Search;
         private StackPanel? _Profiles;
@@ -32,10 +34,16 @@ namespace Kameo.Desktop
 
         /// <summary>Creates the manager for a local profile store.</summary>
         public MainWindow(ProfileStore store, Action changed, Action quit)
+            : this(store, changed, quit, null, null) { }
+
+        internal MainWindow(ProfileStore store, Action changed, Action quit,
+            Func<CancellationToken, Task<string?>>? pickFolder, Action<string, bool, string>? openTerminal)
         {
             _Store = store;
             _Changed = changed;
             _Quit = quit;
+            _PickFolder = pickFolder ?? PickFolderAsync;
+            _OpenTerminal = openTerminal ?? ((id, login, directory) => TerminalLauncher.Open(_Store, id, login, directory));
             _Workspace = store.Preference("workspace") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (!Directory.Exists(_Workspace)) _Workspace = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             Title = "Kameo";
@@ -63,7 +71,7 @@ namespace Kameo.Desktop
             NativeMenu bar = new NativeMenu();
             bar.Add(NativeMenus.Submenu("File",
                 NativeMenus.Item("Add Profile...", () => _ = EditAsync(null, CancellationToken.None), Avalonia.Input.Key.N),
-                NativeMenus.Item("Choose Launch Directory...", () => _ = ChooseWorkspaceAsync(CancellationToken.None)),
+                NativeMenus.Item("Choose Launch Directory...", () => _ = ChooseDirectoryAsync(null, CancellationToken.None)),
                 new NativeMenuItemSeparator(), NativeMenus.Item("Close Window", Close, Avalonia.Input.Key.W)));
             bar.Add(NativeMenus.Edit(this));
             NativeMenu harnesses = new NativeMenu();
@@ -169,7 +177,7 @@ namespace Kameo.Desktop
             }
             navigation.Children.Add(new Border { Height = 1, Background = Palette.Border, Margin = new Thickness(0, 12) });
             navigation.Children.Add(Ui.Text("LAUNCH FOLDER", 10, Palette.Muted));
-            Button folder = Ui.Button(Path.GetFileName(_Workspace.TrimEnd(Path.DirectorySeparatorChar)) + "...", () => _ = ChooseWorkspaceAsync(CancellationToken.None));
+            Button folder = Ui.Button(Path.GetFileName(_Workspace.TrimEnd(Path.DirectorySeparatorChar)) + "...", () => _ = ChooseDirectoryAsync(null, CancellationToken.None));
             folder.MaxWidth = 146;
             ToolTip.SetTip(folder, _Workspace + "\nChoose a launch folder");
             navigation.Children.Add(folder);
@@ -193,11 +201,18 @@ namespace Kameo.Desktop
                 Ui.Text("kameo " + HarnessCatalog.Command(_Harness), 17, weight: FontWeight.Medium));
             Grid command = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
             command.Children.Add(launch);
-            StackPanel commandActions = Ui.Row(Ui.Button("Copy", () => _ = CopyAsync(CancellationToken.None)), Ui.Button("Launch", () =>
+            Button launchIn = Ui.Button("Launch in...", () =>
             {
-                if (active != null) RunAction(() => TerminalLauncher.Open(_Store, active.Id, false, _Workspace));
-            }, true));
-            commandActions.Children[1].IsEnabled = active != null;
+                if (active != null) _ = ChooseDirectoryAsync(active.Id, CancellationToken.None);
+            });
+            launchIn.IsEnabled = active != null;
+            ToolTip.SetTip(launchIn, "Choose a folder for this launch without changing your saved launch folder.");
+            Button launchDefault = Ui.Button("Launch", () =>
+            {
+                if (active != null) RunAction(() => _OpenTerminal(active.Id, false, _Workspace));
+            }, true);
+            launchDefault.IsEnabled = active != null;
+            StackPanel commandActions = Ui.Row(Ui.Button("Copy", () => _ = CopyAsync(CancellationToken.None)), launchIn, launchDefault);
             commandActions.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(commandActions, 1); command.Children.Add(commandActions);
             _Profiles.Children.Add(Ui.Card(command, true));
@@ -224,7 +239,7 @@ namespace Kameo.Desktop
                 actions.Children[0].IsEnabled = !profile.IsActive;
                 if (profile.Kind == CredentialKind.Native)
                 {
-                    actions.Children.Add(Ui.Button(profile.Harness == HarnessKind.Mux ? "Setup" : "Sign in", () => RunAction(() => TerminalLauncher.Open(_Store, profile.Id, true, _Workspace))));
+                    actions.Children.Add(Ui.Button(profile.Harness == HarnessKind.Mux ? "Setup" : "Sign in", () => RunAction(() => _OpenTerminal(profile.Id, true, _Workspace))));
                     actions.Children.Add(Ui.Button("Import...", () => _ = ImportAsync(profile.Id, CancellationToken.None)));
                     actions.Children.Add(Ui.Button("Import current", () => _ = ImportCurrentAsync(profile.Id, CancellationToken.None)));
                 }
@@ -281,12 +296,33 @@ namespace Kameo.Desktop
             if (await dialog.ShowDialog<bool>(this)) RunAction(() => { _Store.Delete(profile.Id); Refresh(); _Changed(); });
         }
 
-        private async Task ChooseWorkspaceAsync(CancellationToken cancellationToken)
+        private async Task ChooseDirectoryAsync(string? launchProfileId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                string? directory = await _PickFolder(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (directory == null) return;
+                RunAction(() =>
+                {
+                    if (!Directory.Exists(directory)) throw new DirectoryNotFoundException("The selected launch folder is no longer available.");
+                    if (launchProfileId != null) _OpenTerminal(launchProfileId, false, directory);
+                    else { _Store.SetPreference("workspace", directory); _Workspace = directory; Refresh(); }
+                });
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception error) when (error is IOException or InvalidOperationException or ArgumentException or UnauthorizedAccessException) { Report(error.Message); }
+        }
+
+        private async Task<string?> PickFolderAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            IReadOnlyList<IStorageFolder> folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose a launch directory", AllowMultiple = false });
-            if (folders.Count == 0) return;
-            RunAction(() => { _Workspace = folders[0].TryGetLocalPath() ?? _Workspace; _Store.SetPreference("workspace", _Workspace); Refresh(); });
+            using IStorageFolder? start = await StorageProvider.TryGetFolderFromPathAsync(_Workspace);
+            IReadOnlyList<IStorageFolder> folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            { Title = "Choose a launch directory", AllowMultiple = false, SuggestedStartLocation = start });
+            try { return folders.Count == 0 ? null : folders[0].TryGetLocalPath() ?? throw new InvalidOperationException("Choose a local launch folder."); }
+            finally { foreach (IStorageFolder folder in folders) folder.Dispose(); }
         }
 
         private async Task CopyAsync(CancellationToken cancellationToken)
