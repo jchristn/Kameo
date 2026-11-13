@@ -175,9 +175,9 @@ Run `kameo --help` for the full command list. `KAMEO_HOME` or `kameo --home /abs
 
 ### Antigravity API-key profiles
 
-Install [Antigravity CLI](https://antigravity.google/docs/cli/install) separately and verify `agy --help` works in your terminal. Kameo's integration was checked against CLI 1.5.7. Create an **Antigravity → API key** profile with a Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey), then select it and launch. Kameo enables the Gemini API provider and passes the selected key to the child process.
+Install [Antigravity CLI](https://antigravity.google/docs/cli/install) separately and verify `agy --help` works in your terminal. Kameo's integration was checked against CLI 1.5.7. Create an **Antigravity → API key** profile with an API key from [Google AI Studio](https://aistudio.google.com/apikey), then select it and launch. Kameo configures Antigravity for API-key authentication and passes the selected key to the child process.
 
-Antigravity account sign-in uses a shared OS keyring. Kameo currently supports **API keys only** for Antigravity because per-profile Google account isolation has not been verified. Existing Gemini API-key profiles retain their keys and selections and now launch `agy`. Clear or update any old `gemini` executable override in the profile editor. Existing Gemini native-login profiles and their files remain intact, but their launch and sign-in actions are disabled; create a new API-key profile to use Antigravity. `kameo gemini` and `kameo agy` are compatibility aliases for `kameo antigravity`, subject to the same API-key restriction.
+Antigravity account sign-in uses a shared OS keyring. Kameo currently supports **API keys only** for Antigravity because per-profile Google account isolation has not been verified. Existing Google API-key profiles retain their keys and selections and now appear under Antigravity and launch `agy`. Clear or update any previous CLI executable override in the profile editor. Legacy Google native-login profiles and their files remain intact, but their launch and sign-in actions are disabled; create a new API-key profile to use Antigravity. `kameo agy` is an alias for `kameo antigravity`, subject to the same API-key restriction. See the [integration notes](docs/ARCHITECTURE.md#antigravity) for legacy compatibility details.
 
 ### Share a Mux endpoints file
 
@@ -202,7 +202,7 @@ kameo edit prf_REPLACE_WITH_ID --endpoints-file /absolute/path/to/endpoints.json
 | --- | --- | --- |
 | Claude Code | `CLAUDE_CONFIG_DIR` | `.credentials.json`; scoped Keychain bridge on macOS |
 | Codex | `CODEX_HOME`, file credential storage | `auth.json` |
-| Antigravity | `agy --gemini_dir`, profile settings, `GEMINI_API_KEY` | API keys only; prior Gemini OAuth files are preserved |
+| Antigravity | Isolated profile directory and settings; selected API key supplied to `agy` | API keys only; legacy Google OAuth files are preserved |
 | Mux | `MUX_CONFIG_DIR` | `endpoints.json`, imported or refreshed from a shared source |
 
 Kameo keeps a stable native directory for each profile, allowing the harness to refresh its own tokens and retain its profile-specific state. It does not copy refreshed tokens back into the original imported login. On macOS, Claude's directory-scoped Keychain entry is restored from the profile's file before launch and snapshotted after exit. Deleting that profile also removes its scoped Keychain entry, leaving the default login alone.
