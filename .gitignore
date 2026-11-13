@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+artifacts/
+TestResults/
+.DS_Store
+.idea/
+.vs/
+*.user
+*.suo
+*.db
+*.db-*
+.kameo/

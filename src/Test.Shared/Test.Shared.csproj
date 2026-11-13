@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><IsAotCompatible>true</IsAotCompatible></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Kameo.Core/Kameo.Core.csproj" /><ProjectReference Include="../Test.Harness/Test.Harness.csproj" ReferenceOutputAssembly="false" /><ProjectReference Include="../Kameo.Cli/Kameo.Cli.csproj" ReferenceOutputAssembly="false" /><PackageReference Include="Touchstone.Core" Version="1.0.0" /></ItemGroup>
+</Project>

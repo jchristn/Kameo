@@ -1,0 +1,73 @@
+namespace Test.Shared
+{
+    using System;
+    using System.Diagnostics;
+    using System.IO;
+    using System.Threading;
+    using System.Threading.Tasks;
+    using Kameo.Core;
+    using Touchstone.Core;
+
+    internal static class CliCases
+    {
+        internal static TestSuiteDescriptor Build() => new TestSuiteDescriptor("Cli", "Command-line end-to-end workflows", new[]
+        {
+            KameoSuites.Case("Cli", "CreateSelectRenameDelete", async (fixture, cancellationToken) =>
+            {
+                CliResult add = await RunAsync(fixture, new[] { "add", "codex", "CLI Work", "--native" }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(add.ExitCode == 0, "CLI creation failed.");
+                string id = add.Output.Trim();
+                CliResult edit = await RunAsync(fixture, new[] { "edit", id, "--name", "CLI Personal" }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(edit.ExitCode == 0 && fixture.Store.Get(id).Name == "CLI Personal", "CLI rename failed.");
+                CliResult select = await RunAsync(fixture, new[] { "select", id }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(select.ExitCode == 0 && fixture.Store.Selected(HarnessKind.Codex).Id == id, "CLI selection failed.");
+                CliResult delete = await RunAsync(fixture, new[] { "delete", id }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(delete.ExitCode == 0 && fixture.Store.List().Count == 0, "CLI deletion failed.");
+            }),
+            KameoSuites.Case("Cli", "StdinKeyAndRedactedList", async (fixture, cancellationToken) =>
+            {
+                CliResult add = await RunAsync(fixture, new[] { "add", "codex", "CLI API", "--api-key-stdin" }, "synthetic-stdin-key\n", cancellationToken).ConfigureAwait(false);
+                Fixture.Check(add.ExitCode == 0 && fixture.Store.Get(add.Output.Trim()).ApiKey == "synthetic-stdin-key", "Standard input key was not saved.");
+                CliResult list = await RunAsync(fixture, new[] { "list" }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(list.ExitCode == 0 && !list.Output.Contains("synthetic-stdin-key", StringComparison.Ordinal) && list.Output.Contains("CLI API", StringComparison.Ordinal), "CLI list leaked a key or lost the profile.");
+            }),
+            KameoSuites.Case("Cli", "UnknownCommandFails", async (fixture, cancellationToken) =>
+            {
+                CliResult result = await RunAsync(fixture, new[] { "unknown-command" }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(result.ExitCode != 0 && result.Error.Contains("Unknown command", StringComparison.Ordinal), "Unknown command should fail with usage guidance.");
+            }),
+            KameoSuites.Case("Cli", "RunRelaysChildExitCode", async (fixture, cancellationToken) =>
+            {
+                Profile profile = fixture.Add(); profile.Executable = Fixture.Probe(); fixture.Store.Update(profile);
+                string output = Path.Combine(fixture.Root, "cli-probe.json");
+                CliResult result = await RunAsync(fixture, new[] { "run", "codex", "--", "--capture", output, "--exit", "17", "literal spaces; $(text)" }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(result.ExitCode == 17 && File.Exists(output), "CLI did not relay the harness exit status.");
+            }),
+            KameoSuites.Case("Cli", "MalformedImportFailsWithoutSecret", async (fixture, cancellationToken) =>
+            {
+                Profile profile = fixture.Add(kind: CredentialKind.Native);
+                string path = Path.Combine(fixture.Root, "invalid.json"); File.WriteAllText(path, "{synthetic-sensitive-marker");
+                CliResult result = await RunAsync(fixture, new[] { "import", profile.Id, path }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(result.ExitCode == 1 && !result.Error.Contains("synthetic-sensitive-marker", StringComparison.Ordinal), "Import errors must fail without echoing credential input.");
+            })
+        });
+
+        private static async Task<CliResult> RunAsync(Fixture fixture, string[] arguments, string? input, CancellationToken cancellationToken)
+        {
+            using Process process = new Process { StartInfo = new ProcessStartInfo(Fixture.Cli()) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true } };
+            process.StartInfo.ArgumentList.Add("--home"); process.StartInfo.ArgumentList.Add(fixture.Root);
+            foreach (string argument in arguments) process.StartInfo.ArgumentList.Add(argument);
+            process.Start();
+            try
+            {
+                Task<string> output = process.StandardOutput.ReadToEndAsync(cancellationToken);
+                Task<string> error = process.StandardError.ReadToEndAsync(cancellationToken);
+                if (input != null) await process.StandardInput.WriteAsync(input.AsMemory(), cancellationToken).ConfigureAwait(false);
+                process.StandardInput.Close();
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                return new CliResult { ExitCode = process.ExitCode, Output = await output.ConfigureAwait(false), Error = await error.ConfigureAwait(false) };
+            }
+            finally { if (!process.HasExited) { process.Kill(true); await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false); } }
+        }
+    }
+}

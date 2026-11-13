@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>kameo</AssemblyName><IsAotCompatible>true</IsAotCompatible></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Kameo.Core/Kameo.Core.csproj" /></ItemGroup>
+</Project>

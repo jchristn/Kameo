@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><EnableAvaloniaXamlCompilation>false</EnableAvaloniaXamlCompilation></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Kameo.Core/Kameo.Core.csproj" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.6" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
+    <EmbeddedResource Include="../../assets/logo-white.png" LogicalName="Kameo.Logo" />
+    <EmbeddedResource Include="../../assets/logo-dark.png" LogicalName="Kameo.LogoDark" />
+  </ItemGroup>
+</Project>

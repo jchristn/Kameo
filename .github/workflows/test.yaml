@@ -1,0 +1,73 @@
+name: Test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: win-x64
+          - os: macos-latest
+            rid: osx-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev xvfb libfontconfig1 libx11-6 libice6 libsm6 libxext6 libxrender1 libxrandr2 libxi6 libxcursor1
+      - name: Build all projects
+        run: dotnet build -c Release
+      - name: Prepare reports
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force artifacts/reports | Out-Null
+      - name: Touchstone console suites
+        run: dotnet run --project src/Test.Automated -c Release --no-build -- --skip fail --results artifacts/reports/core.json --html artifacts/reports/core.html
+      - name: xUnit v3
+        run: dotnet test src/Test.Xunit3 -c Release --no-build --logger trx --results-directory artifacts/reports/xunit
+      - name: NUnit
+        run: dotnet test src/Test.Nunit -c Release --no-build --logger trx --results-directory artifacts/reports/nunit
+      - name: Desktop workflows
+        run: dotnet run --project src/Test.Desktop -c Release --no-build -- --skip fail --results artifacts/reports/desktop.json --html artifacts/reports/desktop.html
+      - name: Native desktop smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dotnet run --project src/Test.Desktop -c Release --no-build -- --native-smoke src/Kameo.Desktop/bin/Release/net10.0/Kameo.Desktop
+      - name: Native desktop smoke (macOS)
+        if: runner.os == 'macOS'
+        run: dotnet run --project src/Test.Desktop -c Release --no-build -- --native-smoke src/Kameo.Desktop/bin/Release/net10.0/Kameo.Desktop
+      - name: Native desktop smoke (Windows)
+        if: runner.os == 'Windows'
+        run: dotnet run --project src/Test.Desktop -c Release --no-build -- --native-smoke src/Kameo.Desktop/bin/Release/net10.0/Kameo.Desktop.exe
+      - name: Publish native AOT suite
+        run: dotnet publish src/Test.Aot -c Release -r ${{ matrix.rid }} -o artifacts/aot
+      - name: Run native AOT suite
+        shell: pwsh
+        run: |
+          $binary = if ($IsWindows) { './artifacts/aot/Test.Aot.exe' } else { './artifacts/aot/Test.Aot' }
+          & $binary --skip fail --results artifacts/reports/aot.json --html artifacts/reports/aot.html
+          exit $LASTEXITCODE
+      - name: Validate shell scripts
+        if: runner.os != 'Windows'
+        run: for script in scripts/*/*.sh; do sh -n "$script" || exit 1; done
+      - name: Validate PowerShell scripts
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path scripts/common/lifecycle.ps1), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | Write-Error; exit 1 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports-${{ matrix.os }}
+          path: artifacts/reports
