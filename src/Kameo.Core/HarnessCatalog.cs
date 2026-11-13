@@ -25,7 +25,7 @@ namespace Kameo.Core
         /// <summary>Returns the installed harness executable, which may differ from the Kameo subcommand.</summary>
         public static string Executable(HarnessKind kind) => kind == HarnessKind.Antigravity ? "agy" : Command(kind);
         /// <summary>Whether Kameo can isolate native account authentication for this harness.</summary>
-        public static bool SupportsNativeLogin(HarnessKind kind) => kind != HarnessKind.Antigravity;
+        public static bool SupportsNativeLogin(HarnessKind kind) => Enum.IsDefined(kind);
         /// <summary>Parses a harness command name.</summary>
         /// <exception cref="ArgumentException">The name is unsupported.</exception>
         public static HarnessKind Parse(string value) => value.ToLowerInvariant() switch
@@ -34,11 +34,11 @@ namespace Kameo.Core
             "antigravity" or "agy" or "gemini" => HarnessKind.Antigravity, "mux" => HarnessKind.Mux,
             _ => throw new ArgumentException("Harness must be claude, codex, antigravity, or mux.", nameof(value))
         };
-        /// <summary>Returns the profile-relative native credential filename. Antigravity retains the legacy Gemini path only for existing data.</summary>
+        /// <summary>Returns the profile-relative native credential filename.</summary>
         public static string CredentialFile(HarnessKind kind) => kind switch
         {
             HarnessKind.Claude => ".credentials.json", HarnessKind.Codex => "auth.json",
-            HarnessKind.Antigravity => ".gemini/oauth_creds.json", HarnessKind.Mux => "endpoints.json",
+            HarnessKind.Antigravity => "antigravity-cli/antigravity-oauth-token", HarnessKind.Mux => "endpoints.json",
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
     }

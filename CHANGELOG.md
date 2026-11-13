@@ -3,8 +3,9 @@
 ## v0.1.0 · Alpha · 2026-11-12
 
 - Initial C# and Avalonia desktop, tray, and command-line applications.
-- API-key profiles for Claude Code, Codex, Antigravity, and Mux; native logins for Claude Code/Codex and endpoint-file profiles for Mux.
-- Antigravity replaces Gemini CLI for Google API-key profiles, preserving legacy native-login data without reusing its credentials.
+- API-key profiles for Claude Code, Codex, Antigravity, and Mux; native logins for Claude Code, Codex, and Antigravity; endpoint-file profiles for Mux.
+- Antigravity Google account profiles with isolated renewable token files, browser-code sign-in through the CLI, imports, concurrent accounts, and preserved legacy login data.
+- Antigravity account launches require verified CLI 1.5.7, disable its automatic updater, and reject authentication/directory overrides.
 - Shared Mux endpoints-file selection, refreshed at each launch without modifying the source.
 - Isolated harness directories, renewable native credentials, explicit imports, and launch wrappers.
 - Compact profile manager, 16 coordinated palettes, light/dark modes, and native macOS menus.

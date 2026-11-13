@@ -108,8 +108,6 @@ namespace Kameo.Core
         public Profile Create(Profile profile)
         {
             ArgumentNullException.ThrowIfNull(profile);
-            if (profile.Kind == CredentialKind.Native && !HarnessCatalog.SupportsNativeLogin(profile.Harness))
-                throw new InvalidOperationException("Antigravity supports API-key profiles only in Kameo. Use a Gemini API key from Google AI Studio.");
             Validate(profile);
             string id = new PrettyId.IdGenerator().GenerateKSortable("prf_", 24);
             string directory = ProfileDirectory(id);

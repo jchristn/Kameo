@@ -37,7 +37,6 @@ namespace Kameo.Core
         public static void Validate(HarnessKind harness, string rawCredentialJson)
         {
             ArgumentNullException.ThrowIfNull(rawCredentialJson);
-            if (!HarnessCatalog.SupportsNativeLogin(harness)) throw new InvalidOperationException("Antigravity native-login import is not supported. Create an API-key profile instead.");
             if (rawCredentialJson.Length > 1024 * 1024) throw new InvalidDataException("Credential files must be smaller than 1 MiB.");
             try
             {
@@ -47,6 +46,8 @@ namespace Kameo.Core
                 {
                     HarnessKind.Claude => root.TryGetProperty("claudeAiOauth", out JsonElement oauth) && HasString(oauth, "accessToken") && HasString(oauth, "refreshToken"),
                     HarnessKind.Codex => HasString(root, "OPENAI_API_KEY") || (root.TryGetProperty("tokens", out JsonElement tokens) && HasString(tokens, "access_token") && HasString(tokens, "refresh_token")),
+                    HarnessKind.Antigravity => HasString(root, "auth_method") && (root.GetProperty("auth_method").GetString() is "consumer" or "gcp")
+                        && root.TryGetProperty("token", out JsonElement token) && HasString(token, "access_token") && HasString(token, "refresh_token"),
                     HarnessKind.Mux => root.TryGetProperty("endpoints", out JsonElement endpoints) && endpoints.ValueKind == JsonValueKind.Array && endpoints.GetArrayLength() > 0 && ValidEndpoints(endpoints),
                     _ => false
                 };

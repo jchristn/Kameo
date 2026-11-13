@@ -51,14 +51,31 @@ namespace Test.Shared
                 CliResult clear = await RunAsync(fixture, new[] { "edit", id, "--endpoints-file", "" }, null, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(clear.ExitCode == 0 && fixture.Store.Get(id).MuxEndpointsFile.Length == 0 && File.Exists(first) && File.Exists(second), "CLI did not clear the link while preserving both sources.");
             }),
-            KameoSuites.Case("Cli", "AntigravityAcceptsApiKeysAndRejectsNative", async (fixture, cancellationToken) =>
+            KameoSuites.Case("Cli", "AntigravityAcceptsApiKeysAndGoogleAccounts", async (fixture, cancellationToken) =>
             {
                 CliResult native = await RunAsync(fixture, new[] { "add", "antigravity", "Native", "--native" }, null, cancellationToken).ConfigureAwait(false);
-                Fixture.Check(native.ExitCode == 1 && fixture.Store.List().Count == 0, "Unsupported native authentication created a profile.");
+                Fixture.Check(native.ExitCode == 0 && fixture.Store.Get(native.Output.Trim()).Kind == CredentialKind.Native, "Google account profile creation failed.");
                 CliResult add = await RunAsync(fixture, new[] { "add", "antigravity", "API", "--api-key-stdin" }, "synthetic-antigravity-key\n", cancellationToken).ConfigureAwait(false);
                 Fixture.Check(add.ExitCode == 0, "Antigravity API creation failed.");
                 Profile profile = fixture.Store.Get(add.Output.Trim());
                 Fixture.Check(profile.Harness == HarnessKind.Antigravity && profile.ApiKey == "synthetic-antigravity-key", "Antigravity API credentials did not persist.");
+            }),
+            KameoSuites.Case("Cli", "AntigravityLoginAndSelectedLaunchKeepAccountTokens", async (fixture, cancellationToken) =>
+            {
+                CliResult add = await RunAsync(fixture, new[] { "add", "antigravity", "Google account", "--native", "--executable", Fixture.Probe() }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(add.ExitCode == 0, "Account creation failed.");
+                string id = add.Output.Trim();
+                string capture = Path.Combine(fixture.Root, "account-launch.json");
+                CliResult login = await RunAsync(fixture, new[] { "login", id, "--", "--capture", capture, "--fixture-token", "synthetic-cli-login" }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(login.ExitCode == 0 && fixture.Store.Get(id).HasNativeCredential, "CLI login did not save an account token.");
+                File.Delete(capture);
+                CliResult launch = await RunAsync(fixture, new[] { "antigravity", "--", "--capture", capture, "--exit", "17" }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(launch.ExitCode == 17 && File.Exists(capture), "Selected account launch failed.");
+                string token = Path.Combine(fixture.Store.ProfileDirectory(id), HarnessCatalog.CredentialFile(HarnessKind.Antigravity));
+                Fixture.Check(File.ReadAllText(token).Contains("synthetic-cli-login", StringComparison.Ordinal), "Relaunch lost the account token.");
+                File.WriteAllText(Path.Combine(fixture.Root, "probe-version.txt"), "2.0.0");
+                CliResult incompatible = await RunAsync(fixture, new[] { "login", id }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(incompatible.ExitCode == 1 && incompatible.Error.Contains(AntigravityCompatibility.SupportedVersion, StringComparison.Ordinal), "CLI did not explain its compatibility requirement.");
             }),
             KameoSuites.Case("Cli", "RunRelaysChildExitCode", async (fixture, cancellationToken) =>
             {

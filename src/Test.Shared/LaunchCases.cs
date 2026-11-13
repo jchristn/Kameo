@@ -35,8 +35,8 @@ namespace Test.Shared
                 {
                     Profile profile = fixture.Add(harness, kind: CredentialKind.Native);
                     ProcessStartInfo start = new LaunchService(fixture.Store).Prepare(profile, Array.Empty<string>(), true).StartInfo;
-                    string variable = harness switch { HarnessKind.Claude => "CLAUDE_CONFIG_DIR", HarnessKind.Codex => "CODEX_HOME", _ => "MUX_CONFIG_DIR" };
-                    Fixture.Check(start.Environment[variable] == fixture.Store.ProfileDirectory(profile.Id), "Native directory not isolated.");
+                    string variable = harness switch { HarnessKind.Claude => "CLAUDE_CONFIG_DIR", HarnessKind.Codex => "CODEX_HOME", HarnessKind.Antigravity => "SSH_CONNECTION", _ => "MUX_CONFIG_DIR" };
+                    Fixture.Check(harness == HarnessKind.Antigravity ? start.ArgumentList.Contains(fixture.Store.ProfileDirectory(profile.Id)) && !string.IsNullOrWhiteSpace(start.Environment[variable]) : start.Environment[variable] == fixture.Store.ProfileDirectory(profile.Id), "Native directory not isolated.");
                     if (harness == HarnessKind.Claude) Fixture.Check(start.ArgumentList.SequenceEqual(new[] { "auth", "login" }), "Claude login command incorrect.");
                     if (harness == HarnessKind.Codex) Fixture.Check(start.ArgumentList.Contains("login") && start.ArgumentList.Contains("cli_auth_credentials_store=\"file\""), "Codex file auth missing.");
                     if (harness == HarnessKind.Mux) Fixture.Check(start.ArgumentList.Count == 0, "Mux should open its interactive first-run wizard without submitting a prompt.");
@@ -74,8 +74,8 @@ namespace Test.Shared
                 foreach (string name in new[] { "antigravity", "agy", "gemini" }) Fixture.Check(HarnessCatalog.Parse(name) == HarnessKind.Antigravity, "Antigravity alias was not recognized.");
                 Fixture.Check(HarnessCatalog.Command(HarnessKind.Antigravity) == "antigravity", "Wrapper command should use the current product name.");
             });
-            Add("AntigravityNativeCreationRejected", fixture => Fixture.Throws<InvalidOperationException>(() => fixture.Add(HarnessKind.Antigravity, kind: CredentialKind.Native)));
-            Add("AntigravityNativeImportRejected", fixture => Fixture.Throws<InvalidOperationException>(() => CredentialFiles.Validate(HarnessKind.Antigravity, "{\"refresh_token\":\"legacy\"}")));
+            Add("AntigravityNativeCreationAllowed", fixture => Fixture.Check(fixture.Add(HarnessKind.Antigravity, kind: CredentialKind.Native).Kind == CredentialKind.Native, "Google account creation failed."));
+            Add("AntigravityLegacyImportRejected", fixture => Fixture.Throws<InvalidDataException>(() => CredentialFiles.Validate(HarnessKind.Antigravity, "{\"refresh_token\":\"legacy\"}")));
             Add("AntigravityIsolationOverridesRejected", fixture =>
             {
                 Profile profile = fixture.Add(HarnessKind.Antigravity);

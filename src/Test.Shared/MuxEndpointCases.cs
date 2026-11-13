@@ -103,16 +103,16 @@ namespace Test.Shared
                 retained.Name = "Migrated"; upgraded.Update(retained);
                 Fixture.Check(new ProfileStore(fixture.Root).Get(profile.Id).Name == "Migrated", "Migrated store cannot be reopened or updated.");
             });
-            Add("LegacyGeminiLoginIsPreservedButCannotLaunch", fixture =>
+            Add("LegacyGoogleLoginIsPreservedWhileNewSignInIsAvailable", fixture =>
             {
                 Profile profile = fixture.Add(kind: CredentialKind.Native);
                 Sql(fixture, "DELETE FROM selections; UPDATE profiles SET harness=2; INSERT INTO selections SELECT harness,id FROM profiles;");
                 string file = Path.Combine(fixture.Store.ProfileDirectory(profile.Id), ".gemini", "oauth_creds.json");
                 PrivateFiles.Write(file, "{\"refresh_token\":\"synthetic-legacy\"}");
                 Profile retained = new ProfileStore(fixture.Root).Get(profile.Id);
-                Fixture.Check(retained.Harness == HarnessKind.Antigravity && retained.HasNativeCredential && File.Exists(file), "Migration lost legacy Google login data.");
-                Fixture.Throws<InvalidOperationException>(() => new LaunchService(fixture.Store).Prepare(retained, Array.Empty<string>()));
-                Fixture.Check(File.ReadAllText(file).Contains("synthetic-legacy", StringComparison.Ordinal), "Rejected launch modified legacy credentials.");
+                Fixture.Check(retained.Harness == HarnessKind.Antigravity && !retained.HasNativeCredential && File.Exists(file), "Migration lost legacy Google login data.");
+                new LaunchService(fixture.Store).Prepare(retained, Array.Empty<string>(), true);
+                Fixture.Check(File.ReadAllText(file).Contains("synthetic-legacy", StringComparison.Ordinal), "New sign-in preparation modified legacy credentials.");
             });
             return new TestSuiteDescriptor("MuxEndpoints", "Shared endpoints and schema migration", cases);
         }

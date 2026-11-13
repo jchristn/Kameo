@@ -117,7 +117,8 @@ namespace Kameo.Cli
               claude|codex|antigravity|mux [ARGS...]     Shorthand for run (Antigravity launches agy)
 
             API keys never go in command arguments. Pass them through stdin or the desktop editor.
-            Antigravity uses API-key profiles only; Mux opens its endpoint setup wizard.
+            Antigravity Google accounts require CLI 1.5.7; paste browser codes into its terminal.
+            Antigravity also supports API keys. Mux opens its endpoint setup wizard.
             Run with --device-auth only for Codex. Harnesses must already be installed.
             """);
     }

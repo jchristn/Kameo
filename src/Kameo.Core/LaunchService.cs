@@ -39,8 +39,6 @@ namespace Kameo.Core
             string directory = _Store.ProfileDirectory(profile.Id);
             if (!Directory.Exists(directory)) throw new DirectoryNotFoundException("The profile directory is missing. Recreate the profile or restore a backup.");
             ValidateArguments(profile.Harness, arguments);
-            if (profile.Kind == CredentialKind.Native && !HarnessCatalog.SupportsNativeLogin(profile.Harness))
-                throw new InvalidOperationException("Antigravity currently supports API-key profiles in Kameo. Create a new API-key profile; your previous Gemini login data is preserved.");
             if (login && profile.Kind != CredentialKind.Native) throw new InvalidOperationException("API-key profiles do not need a browser login.");
             ProcessStartInfo start = new ProcessStartInfo
             {
@@ -70,13 +68,7 @@ namespace Kameo.Core
                     if (login) start.ArgumentList.Add("login");
                     break;
                 case HarnessKind.Antigravity:
-                    start.Environment["GEMINI_API_KEY"] = profile.ApiKey;
-                    start.ArgumentList.Add("--gemini_dir"); start.ArgumentList.Add(directory);
-                    start.ArgumentList.Add("--settings"); start.ArgumentList.Add("{\"modelProvider\":\"gemini\"}");
-                    string settingsPath = Path.Combine(directory, "antigravity-cli", "settings.json");
-                    JsonObject settings = File.Exists(settingsPath) ? JsonNode.Parse(PrivateFiles.Read(settingsPath)) as JsonObject ?? new JsonObject() : new JsonObject();
-                    settings["modelProvider"] = "gemini";
-                    PrivateFiles.Write(settingsPath, settings.ToJsonString());
+                    AntigravityAuthentication.Configure(start, profile, directory);
                     break;
                 case HarnessKind.Mux:
                     start.Environment["MUX_CONFIG_DIR"] = directory;
@@ -101,9 +93,12 @@ namespace Kameo.Core
             using FileStream lease = _Store.AcquireLease(id);
             Profile profile = _Store.Get(id);
             LaunchPlan plan = Prepare(profile, arguments, login);
+            ProcessStartInfo resolved = ExecutableResolver.Resolve(plan.StartInfo);
+            if (profile.Harness == HarnessKind.Antigravity && profile.Kind == CredentialKind.Native)
+                await AntigravityCompatibility.VerifyAsync(resolved, _Store.ProfileDirectory(id), cancellationToken).ConfigureAwait(false);
             if (profile.Harness == HarnessKind.Claude && profile.Kind == CredentialKind.Native && OperatingSystem.IsMacOS())
                 await MacCredentialBridge.RestoreAsync(_Store.ProfileDirectory(id), cancellationToken).ConfigureAwait(false);
-            using Process process = new Process { StartInfo = ExecutableResolver.Resolve(plan.StartInfo) };
+            using Process process = new Process { StartInfo = resolved };
             process.Start();
             try
             {
@@ -119,6 +114,8 @@ namespace Kameo.Core
                 }
                 if (profile.Harness == HarnessKind.Claude && profile.Kind == CredentialKind.Native && OperatingSystem.IsMacOS())
                     await MacCredentialBridge.SnapshotAsync(_Store.ProfileDirectory(id), cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                if (profile.Harness == HarnessKind.Antigravity && profile.Kind == CredentialKind.Native)
+                    AntigravityAuthentication.ProtectCredentialFile(_Store.ProfileDirectory(id));
             }
         }
 
@@ -132,7 +129,7 @@ namespace Kameo.Core
                     HarnessKind.Mux => argument == "--config-dir" || argument.StartsWith("--config-dir=", StringComparison.Ordinal),
                     HarnessKind.Claude => argument == "--settings" || argument.StartsWith("--settings=", StringComparison.Ordinal),
                     HarnessKind.Codex => argument.Contains("cli_auth_credentials_store", StringComparison.Ordinal) || argument.Contains("forced_login_method", StringComparison.Ordinal),
-                    HarnessKind.Antigravity => argument.TrimStart('-').Split('=')[0] is "gemini_dir" or "gemini-dir" or "settings" or "remote-agent" or "remote-control" or "flagfile" or "undefok",
+                    HarnessKind.Antigravity => AntigravityAuthentication.OverridesIsolation(argument),
                     _ => false
                 };
                 if (blocked) throw new ArgumentException("That argument overrides Kameo's profile authentication or directory. Configure the profile in Kameo instead.", nameof(arguments));

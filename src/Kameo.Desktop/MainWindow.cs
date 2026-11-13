@@ -233,8 +233,8 @@ namespace Kameo.Desktop
                 heading.Children.Add(Ui.Text(profile.Name, 16, weight: FontWeight.SemiBold));
                 Border badge = Ui.Badge(profile.IsActive ? "SELECTED" : profile.Kind == CredentialKind.ApiKey ? "API KEY" : "NATIVE LOGIN", profile.IsActive);
                 Grid.SetColumn(badge, 1); heading.Children.Add(badge);
-                string description = profile.Kind == CredentialKind.Native && !HarnessCatalog.SupportsNativeLogin(profile.Harness)
-                    ? "Previous Gemini login preserved. Add an Antigravity API-key profile to launch."
+                string description = profile.Harness == HarnessKind.Antigravity && profile.Kind == CredentialKind.Native
+                    ? profile.HasNativeCredential ? "Google account saved · isolated login" : "Sign in with a Google account · CLI " + AntigravityCompatibility.SupportedVersion
                     : profile.MuxEndpointsFile.Length > 0 ? "Shared endpoints: " + Path.GetFileName(profile.MuxEndpointsFile)
                     : profile.Kind == CredentialKind.ApiKey ? "API key" : profile.HasNativeCredential ? "Native login saved" : "Sign in or import a login";
                 StackPanel actions = Ui.Row(
@@ -274,13 +274,18 @@ namespace Kameo.Desktop
         {
             cancellationToken.ThrowIfCancellationRequested();
             IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-            { Title = "Import native credential JSON", AllowMultiple = false, FileTypeFilter = new[] { new FilePickerFileType("JSON credentials") { Patterns = new[] { "*.json" } } } });
-            if (files.Count == 0) return;
-            RunAction(() =>
+            { Title = "Import native credential file", AllowMultiple = false, FileTypeFilter = new[]
+                { new FilePickerFileType("Credential files") { Patterns = new[] { "*.json", "*-oauth-token" } }, FilePickerFileTypes.All } });
+            try
             {
-                string path = files[0].TryGetLocalPath() ?? throw new InvalidOperationException("Choose a local credential file.");
-                new CredentialFiles(_Store).Import(id, path); Refresh(); _Changed();
-            });
+                if (files.Count == 0) return;
+                RunAction(() =>
+                {
+                    string path = files[0].TryGetLocalPath() ?? throw new InvalidOperationException("Choose a local credential file.");
+                    new CredentialFiles(_Store).Import(id, path); Refresh(); _Changed();
+                });
+            }
+            finally { foreach (IStorageFile file in files) file.Dispose(); }
         }
 
         private async Task ImportCurrentAsync(string id, CancellationToken cancellationToken)

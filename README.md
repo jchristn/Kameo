@@ -11,7 +11,7 @@ Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. I
 ## Features
 
 - Add, rename, edit, import, select, and delete credential profiles.
-- API keys for all supported harnesses; isolated native subscription/OAuth logins for Claude Code and Codex, and endpoint-file profiles for Mux.
+- API keys for all supported harnesses; isolated native subscription/OAuth logins for Claude Code, Codex, and Antigravity, and endpoint-file profiles for Mux.
 - Import existing native credential files without modifying the originals.
 - Independent selections for Claude Code, Codex, Antigravity, and Mux.
 - Shared Mux endpoints files: choose one JSON file for multiple profiles and pick up source changes at the next launch.
@@ -89,7 +89,7 @@ Remove any Kameo `PATH` entries, aliases, shortcuts, or symlinks you added manua
 ## Add your first profile
 
 1. Select a harness and click **Add profile**.
-2. Choose **API key** or **Native login / import**. Antigravity currently offers API keys only. For Mux, choose **API key** and enter the adapter, endpoint, and model, or choose **Endpoints file / setup** and browse to an existing endpoints JSON file.
+2. Choose **API key** or **Native login / import**. For Antigravity, choose **Google account** or **API key**. For Mux, choose **API key** and enter the adapter, endpoint, and model, or choose **Endpoints file / setup** and browse to an existing endpoints JSON file.
 3. For native authentication, click **Sign in** to open the harness in a terminal, **Import current** to copy an existing login, or **Import...** to select a native credential JSON file. Mux's **Setup** opens its interactive TUI and first-run wizard; an existing Mux profile can use its F1 setup command.
 4. Click **Use profile** or choose the profile from the tray. The first profile for a harness is selected automatically.
 5. Click **Launch** to use the saved launch folder, **Launch in...** to choose a folder for this session only, or use a Kameo terminal command. Canceling the folder picker starts nothing; choosing a folder with **Launch in...** does not change the saved launch folder in the sidebar.
@@ -173,11 +173,30 @@ The desktop provides the same fields. Mux's current source has no separate subsc
 
 Run `kameo --help` for the full command list. `KAMEO_HOME` or `kameo --home /absolute/path ...` selects an alternate data directory.
 
-### Antigravity API-key profiles
+### Antigravity Google accounts and API keys
 
-Install [Antigravity CLI](https://antigravity.google/docs/cli/install) separately and verify `agy --help` works in your terminal. Kameo's integration was checked against CLI 1.5.7. Create an **Antigravity → API key** profile with an API key from [Google AI Studio](https://aistudio.google.com/apikey), then select it and launch. Kameo configures Antigravity for API-key authentication and passes the selected key to the child process.
+Install [Antigravity CLI](https://antigravity.google/docs/install?tab=cli) separately. **Google account profiles require CLI 1.5.7**; check `agy --version`. Kameo checks this version before each account session because account isolation relies on internal CLI behavior. Other versions are rejected until their behavior is verified and supported by Kameo.
 
-Antigravity account sign-in uses a shared OS keyring. Kameo currently supports **API keys only** for Antigravity because per-profile Google account isolation has not been verified. Existing Google API-key profiles retain their keys and selections and now appear under Antigravity and launch `agy`. Clear or update any previous CLI executable override in the profile editor. Legacy Google native-login profiles and their files remain intact, but their launch and sign-in actions are disabled; create a new API-key profile to use Antigravity. `kameo agy` is an alias for `kameo antigravity`, subject to the same API-key restriction. See the [integration notes](docs/ARCHITECTURE.md#antigravity) for legacy compatibility details.
+1. Add an **Antigravity → Google account** profile, give it a name, and save.
+2. Click **Sign in**. Follow the URL in the terminal, choose the Google account, and paste the returned authorization code into **that terminal**. The code is not an API key and does not belong in Kameo's API-key field.
+3. Repeat with another profile for each account. Select a profile and click **Launch** or **Launch in...**, or run `kameo antigravity` to use the selected profile.
+
+Each profile keeps its own renewable login file. Separate profiles can run concurrently, and token refresh stays with the profile that started the session. Kameo disables Antigravity's automatic updater for managed account sessions so it cannot silently change the verified storage behavior. Updating the CLI separately may require a compatible Kameo update. Managed account sessions use Antigravity's SSH-style file storage; child tools inherit the SSH-session indicator. The original `agy` command retains its normal behavior.
+
+From the terminal:
+
+```sh
+kameo add antigravity "Work Google account" --native
+kameo login PROFILE_ID
+kameo select PROFILE_ID
+kameo antigravity
+```
+
+Replace `PROFILE_ID` with the ID printed by `add`. Sign-in and refresh are handled by Antigravity itself. Kameo does not exchange authorization codes or export logins from the shared OS keyring. **Import** accepts an existing Antigravity account token file; **Import current login** works only when the default CLI already has a file-backed login. Otherwise, use **Sign in**.
+
+API keys remain available: create an **Antigravity → API key** profile with a key from [Google AI Studio](https://aistudio.google.com/apikey). Kameo configures API-key authentication and passes the selected key to the child process. The account-specific version check does not apply to API-key profiles.
+
+Existing profiles, keys, selections, and legacy login files are retained. An older Google native-login profile can now use **Sign in** to create an Antigravity login; its old login file is left intact and is not reused. Clear or update an older executable override to point to the supported `agy` binary. `kameo agy` is an alias for `kameo antigravity`. See the [integration notes](docs/ARCHITECTURE.md#antigravity) for storage details and verification limits.
 
 ### Share a Mux endpoints file
 
@@ -202,12 +221,12 @@ kameo edit prf_REPLACE_WITH_ID --endpoints-file /absolute/path/to/endpoints.json
 | --- | --- | --- |
 | Claude Code | `CLAUDE_CONFIG_DIR` | `.credentials.json`; scoped Keychain bridge on macOS |
 | Codex | `CODEX_HOME`, file credential storage | `auth.json` |
-| Antigravity | Isolated profile directory and settings; selected API key supplied to `agy` | API keys only; legacy Google OAuth files are preserved |
+| Antigravity | Isolated account token file and settings, or selected API key supplied to `agy` | Google accounts require CLI 1.5.7; legacy login files are preserved |
 | Mux | `MUX_CONFIG_DIR` | `endpoints.json`, imported or refreshed from a shared source |
 
 Kameo keeps a stable native directory for each profile, allowing the harness to refresh its own tokens and retain its profile-specific state. It does not copy refreshed tokens back into the original imported login. On macOS, Claude's directory-scoped Keychain entry is restored from the profile's file before launch and snapshotted after exit. Deleting that profile also removes its scoped Keychain entry, leaving the default login alone.
 
-Existing supported file-based logins and Claude's macOS Keychain login can be imported automatically. For Codex logins stored only in an OS credential store, use **Sign in** to create an isolated login or import an exported native credential file. Antigravity native-login imports are currently unavailable. Provider credential formats may evolve; the [integration notes](docs/ARCHITECTURE.md) record the contracts used here.
+Existing supported file-based logins and Claude's macOS Keychain login can be imported automatically. For Codex logins stored only in an OS credential store, use **Sign in** to create an isolated login or import an exported native credential file. Antigravity imports accept its account token file; shared OS-keyring logins require a separate sign-in. Provider credential formats may evolve; the [integration notes](docs/ARCHITECTURE.md) record the contracts used here.
 
 One running Kameo invocation holds an exclusive lease on its profile. Another invocation of that same profile, editing, import, or deletion waits for you to close it first; Kameo reports that the profile is in use. Other profiles can run concurrently, and you can change the selection at any time. This avoids concurrent native token refresh and destructive edits during a session.
 

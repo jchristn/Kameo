@@ -194,14 +194,42 @@ namespace Test.Desktop
                 Check(store.Get(profile.Id).Name == "Original" && store.Get(profile.Id).MuxEndpointsFile == "", "Invalid shared file caused a partial profile update.");
                 Check(Text(editor).Contains("valid Mux credentials", StringComparison.Ordinal), "Invalid file error is missing.");
             });
-            Add("AntigravityEditorOffersApiKeysOnly", (window, store) =>
+            Add("AntigravityEditorOffersAccountsAndApiKeys", (window, store) =>
             {
                 Navigate(window, "Antigravity"); Click(Button(window, "+  Add profile")); Window editor = window.OwnedWindows.Single();
                 ComboBox authentication = editor.GetVisualDescendants().OfType<ComboBox>().Single(box => box.Name == "AuthenticationKind");
-                Check(authentication.ItemCount == 1 && authentication.SelectedIndex == 0, "Antigravity offers an unsupported native login.");
+                Check(authentication.ItemCount == 2 && authentication.SelectedIndex == 1, "Google account must be available and selected for new profiles.");
+                authentication.SelectedIndex = 0; Dispatcher.UIThread.RunJobs();
                 Field(editor, "ProfileName").Text = "Google API"; Field(editor, "ApiKey").Text = "synthetic-google-key";
                 Click(Button(editor, "Save profile")); window.Refresh();
                 Check(store.Selected(HarnessKind.Antigravity).Kind == CredentialKind.ApiKey && Text(window).Contains("kameo antigravity", StringComparison.Ordinal), "Antigravity API profile did not produce the current wrapper command.");
+            });
+            Add("AntigravityAccountCreationAndCredentialStatus", (window, store) =>
+            {
+                Navigate(window, "Antigravity"); Click(Button(window, "+  Add profile")); Window editor = window.OwnedWindows.Single();
+                Check(Text(editor).Contains("paste the authorization code", StringComparison.Ordinal) && Text(editor).Contains(AntigravityCompatibility.SupportedVersion, StringComparison.Ordinal), "Account sign-in guidance is missing.");
+                Field(editor, "ProfileName").Text = "Google Work"; Click(Button(editor, "Save profile")); window.Refresh();
+                Profile profile = store.Selected(HarnessKind.Antigravity);
+                Check(profile.Kind == CredentialKind.Native && !profile.HasNativeCredential, "A Google account requires an API key or was shown as authenticated before sign-in.");
+                Check(Button(window, "Sign in").IsVisible && Button(window, "Launch").IsEnabled && Button(window, "Launch in...").IsEnabled, "Account actions are unavailable.");
+                new CredentialFiles(store).ImportText(profile.Id, "{\"auth_method\":\"consumer\",\"token\":{\"access_token\":\"synthetic\",\"refresh_token\":\"synthetic-refresh\"}}");
+                window.Refresh(); Check(Text(window).Contains("Google account saved", StringComparison.Ordinal), "Saved account status was not refreshed.");
+                Click(Button(window, "Edit")); editor = window.OwnedWindows.Single();
+                ComboBox authentication = editor.GetVisualDescendants().OfType<ComboBox>().Single(box => box.Name == "AuthenticationKind");
+                Check(authentication.SelectedIndex == 1 && !authentication.IsEnabled, "Editing changed the account's authentication kind.");
+            });
+            Add("AntigravitySignInLaunchesTheCorrectProfile", (_, store) =>
+            {
+                Profile profile = store.Create(new Profile { Harness = HarnessKind.Antigravity, Kind = CredentialKind.Native, Name = "Google Personal" });
+                store.SetPreference("workspace", store.Root); List<bool> logins = new List<bool>();
+                MainWindow window = new MainWindow(store, () => { }, () => { }, cancellationToken => Task.FromResult<string?>(store.Root), (id, login, directory) =>
+                { Check(id == profile.Id && directory == store.Root, "Account action used the wrong profile or folder."); logins.Add(login); });
+                try
+                {
+                    window.Show(); Navigate(window, "Antigravity"); Click(Button(window, "Sign in")); Click(Button(window, "Launch")); Click(Button(window, "Launch in..."));
+                    Check(logins.SequenceEqual(new[] { true, false, false }), "Account actions did not distinguish login from launch.");
+                }
+                finally { window.Close(); }
             });
             return await ConsoleRunner.RunMainAsync(new[] { new TestSuiteDescriptor("Desktop", "Desktop workflows and native menu contracts", cases) }, args).ConfigureAwait(false);
         }

@@ -13,7 +13,7 @@ namespace Test.Shared
         {
             HarnessKind.Claude => "{\"claudeAiOauth\":{\"accessToken\":\"synthetic-access\",\"refreshToken\":\"synthetic-refresh\",\"expiresAt\":1900000000000}}",
             HarnessKind.Codex => "{\"tokens\":{\"access_token\":\"synthetic-access\",\"refresh_token\":\"synthetic-refresh\",\"id_token\":\"synthetic-id\"}}",
-            HarnessKind.Antigravity => "{\"refresh_token\":\"synthetic-refresh\",\"access_token\":\"synthetic-access\"}",
+            HarnessKind.Antigravity => "{\"auth_method\":\"consumer\",\"token\":{\"refresh_token\":\"synthetic-refresh\",\"access_token\":\"synthetic-access\",\"expiry\":\"2030-01-01T00:00:00Z\"}}",
             HarnessKind.Mux => "{\"endpoints\":[{\"name\":\"test\",\"adapterType\":\"openai\",\"model\":\"test-model\",\"apiKey\":\"synthetic-key\"}]}",
             _ => throw new ArgumentOutOfRangeException(nameof(harness))
         };

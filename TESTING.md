@@ -8,7 +8,8 @@ Tests use Touchstone 1.0.0 and synthetic credentials. Every fixture owns a tempo
 - **Credentials:** every native format, failed-import preservation, input bounds, malformed JSON redaction, unsupported shapes, profile isolation, Mux endpoint validation, file atomicity, links and broken links, scoped Keychain naming.
 - **Launch:** every harness in API/native mode, stable per-profile paths, inherited key removal, literal argv boundaries, key rotation, native login commands, override rejection, executable resolution, real child environment and exit status, cancellation and lease release.
 - **CLI:** real command execution, profile CRUD and selection, stdin keys, redacted listing and import failures, unknown commands, and child exit codes.
-- **Shared Mux endpoints and migration:** persisted links, multiple profiles sharing a file, refresh on launch, missing/invalid sources, deletion preserving the source, lease enforcement, schema upgrades, and retained legacy Gemini login data. Antigravity tests cover executable selection, API-provider settings, compatibility aliases, and rejection of unsupported native authentication and configuration overrides.
+- **Shared Mux endpoints and migration:** persisted links, multiple profiles sharing a file, refresh on launch, missing/invalid sources, deletion preserving the source, lease enforcement, schema upgrades, and retained legacy Google login data.
+- **Antigravity accounts:** API/account creation, isolated directories and provider settings, inherited-auth removal, SSH file-store selection, auto-update opt-out, token imports and validation, legacy-file preservation, symlink rejection, exact-version gating, failed/oversized/timed-out/canceled probes, lease release, concurrent refresh persistence, cancellation, relaunch, and deletion isolation. Compatibility aliases and configuration/updater overrides are covered.
 - **Lifecycle:** startup registration round trips for all five platform directories, existing shell configuration preservation, idempotence, desktop singleton leases, and graceful stop handshake.
 
 Run all shared descriptors through each required host:
@@ -27,7 +28,7 @@ Adjust the runtime identifier and executable extension for your machine. `Test.H
 
 ## Desktop workflows
 
-`Test.Desktop` uses Touchstone descriptors and Avalonia's headless dispatcher to exercise the actual control tree. It checks the empty state, compact layout constraints, native menu inventory, harness navigation, editor validation and creation, key masking/preservation, search, selection, delete confirmation, and palette persistence. Launch-in workflows inject a folder picker and terminal launcher to verify the selected profile and directory, cancellation, missing folders, picker/terminal failures, and preservation of the saved launch folder without invoking a real harness.
+`Test.Desktop` uses Touchstone descriptors and Avalonia's headless dispatcher to exercise the actual control tree. It checks the empty state, compact layout constraints, native menu inventory, harness navigation, editor validation and creation, key masking/preservation, search, selection, delete confirmation, and palette persistence. Launch-in workflows inject a folder picker and terminal launcher to verify the selected profile and directory, cancellation, missing folders, picker/terminal failures, and preservation of the saved launch folder without invoking a real harness. Antigravity workflows cover API/account choices, account creation and status, immutable authentication kind during editing, and the profile and login mode passed by Sign in, Launch, and Launch in... actions.
 
 ```sh
 dotnet run --project src/Test.Desktop -- --skip fail --results artifacts/reports/desktop.json
