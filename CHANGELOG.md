@@ -10,6 +10,7 @@
 - Isolated harness directories, renewable native credentials, explicit imports, and launch wrappers.
 - Compact profile manager, 16 coordinated palettes, light/dark modes, and native macOS menus.
 - **Launch in...** chooses a directory for one session while preserving the saved launch folder.
+- Profile launch submenus, search width aligned with profile cards, and a shared About/startup splash design with palette-aware logos and a repository link.
 - Source-build lifecycle scripts for Windows, macOS, Linux, WSL, and WSL2.
 - Shared Touchstone suites, xUnit v3, NUnit, desktop workflows, native startup smoke tests, and native AOT coverage.
 - MIT-licensed source distribution with installation, usage, troubleshooting, and issue-reporting documentation.

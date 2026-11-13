@@ -34,6 +34,8 @@ Adjust the runtime identifier and executable extension for your machine. `Test.H
 dotnet run --project src/Test.Desktop -- --skip fail --results artifacts/reports/desktop.json
 ```
 
+Additional desktop cases verify search/card alignment with scrolling and resizing, native submenu launches after selection changes and deletion, About content and contrasting logos across all 16 palettes in both modes, and two-second splash dismissal without closing the manager or About dialog.
+
 Headless tests cannot prove platform tray integration. A separate native smoke test starts a real desktop against a temporary store, verifies it stays alive, changes profile state to exercise native tray updates, deletes a profile, and requests graceful shutdown:
 
 ```sh

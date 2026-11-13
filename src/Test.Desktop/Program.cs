@@ -28,7 +28,8 @@ namespace Test.Desktop
             if (args.Length == 2 && args[0] == "--native-smoke") return await NativeSmoke.RunAsync(args[1], CancellationToken.None).ConfigureAwait(false);
             using HeadlessUnitTestSession session = HeadlessUnitTestSession.StartNew(typeof(Program));
             List<TestCaseDescriptor> cases = new List<TestCaseDescriptor>();
-            void Add(string name, Action<MainWindow, ProfileStore> action) => cases.Add(new TestCaseDescriptor("Desktop", name, name, cancellationToken => session.Dispatch(async () =>
+            void Add(string name, Action<MainWindow, ProfileStore> action) => AddAsync(name, (window, store, _) => { action(window, store); return Task.CompletedTask; });
+            void AddAsync(string name, Func<MainWindow, ProfileStore, CancellationToken, Task> action) => cases.Add(new TestCaseDescriptor("Desktop", name, name, cancellationToken => session.Dispatch(async () =>
             {
                 string root = Path.Combine(OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetTempPath(), "kameo-ui-test-" + Guid.NewGuid().ToString("N"));
                 MainWindow? window = null;
@@ -38,7 +39,7 @@ namespace Test.Desktop
                     window = new MainWindow(store, () => { }, () => { });
                     window.Show();
                     Dispatcher.UIThread.RunJobs();
-                    action(window, store);
+                    await action(window, store, cancellationToken);
                     await Task.Delay(30, cancellationToken);
                 }
                 finally
@@ -106,6 +107,83 @@ namespace Test.Desktop
             {
                 NativeMenu menu = NativeMenu.GetMenu(window) ?? throw new InvalidOperationException("Native menu missing.");
                 Check(menu.Items.OfType<NativeMenuItem>().Select(item => item.Header).SequenceEqual(new[] { "File", "Edit", "Profiles", "View", "Window", "Help" }), "Native menu sections missing.");
+            });
+            Add("SearchWidthTracksCardsWithScrollingAndResize", (window, store) =>
+            {
+                void Verify()
+                {
+                    Sync(window);
+                    TextBox search = Field(window, "SearchProfiles");
+                    StackPanel cards = window.GetVisualDescendants().OfType<StackPanel>().Single(panel => panel.Name == "ProfileCards");
+                    Check(cards.Bounds.Width > 100 && Math.Abs(search.Bounds.Width - cards.Bounds.Width) < 1, "Search and card widths differ.");
+                    Check(Math.Abs(search.TranslatePoint(default, window)!.Value.X - cards.TranslatePoint(default, window)!.Value.X) < 1, "Search and cards are not aligned.");
+                }
+                Verify();
+                for (int index = 0; index < 8; index++) store.Create(new Profile { Harness = HarnessKind.Claude, Name = "Profile " + index, ApiKey = "synthetic" });
+                window.Refresh(); Verify(); window.Width = 720; Verify();
+                Field(window, "SearchProfiles").Text = "Profile 1"; Verify();
+            });
+            Add("ProfileSubmenusLaunchTheCurrentSelection", (_, store) =>
+            {
+                store.SetPreference("workspace", store.Root);
+                List<string> launches = new List<string>();
+                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root),
+                    (id, login, directory) => { Check(!login && directory == store.Root, "Menu launch used the wrong mode or folder."); launches.Add(id); });
+                try
+                {
+                    window.Show();
+                    foreach (HarnessKind harness in HarnessCatalog.All)
+                    {
+                        NativeMenu choices = HarnessMenu(window, harness);
+                        Check(!((NativeMenuItem)choices.Items[0]).IsEnabled && !((NativeMenuItem)choices.Items[1]).IsEnabled, "An empty harness can launch.");
+                        Profile first = store.Create(new Profile { Harness = harness, Name = "First", Kind = CredentialKind.Native });
+                        Profile second = store.Create(new Profile { Harness = harness, Name = "Second", Kind = CredentialKind.Native });
+                        window.Refresh(); Check(ReferenceEquals(choices, HarnessMenu(window, harness)), "Native submenu was replaced.");
+                        Click((NativeMenuItem)choices.Items[0]); Check(launches.Last() == first.Id, "Menu launched another harness or profile.");
+                        store.Select(second.Id);
+                        // Resolve selection when invoked, even before the periodic UI refresh.
+                        Click((NativeMenuItem)choices.Items[0]); Check(launches.Last() == second.Id, "Menu launched a stale selection.");
+                        window.RefreshIfChanged(); Check(((NativeMenuItem)choices.Items[0]).Header == "Launch Second", "Selection label did not refresh.");
+                        Click((NativeMenuItem)choices.Items[1]); Check(launches.Last() == second.Id, "Menu Launch in used a different profile.");
+                        Click((NativeMenuItem)choices.Items[3]); Check(Text(window).Contains("kameo " + HarnessCatalog.Command(harness), StringComparison.Ordinal), "Manage profiles did not navigate.");
+                        store.Delete(second.Id); store.Delete(first.Id); window.RefreshIfChanged();
+                        Check(!((NativeMenuItem)choices.Items[0]).IsEnabled, "Deleted profiles remain launchable.");
+                    }
+                }
+                finally { window.Close(); }
+            });
+            Add("AboutUsesPaletteLogoAndRepositoryLink", (window, store) =>
+            {
+                bool originalDark = Palette.Dark; string originalScheme = Palette.Scheme.Id;
+                try
+                {
+                    foreach (ColorScheme scheme in Palette.Schemes)
+                    foreach (bool dark in new[] { false, true })
+                    {
+                        Palette.Apply(Application.Current!, dark, scheme.Id); window.ShowAbout();
+                        AboutWindow about = window.OwnedWindows.OfType<AboutWindow>().Single();
+                        Sync(about);
+                        Check(about.LogoResource == (dark ? "Kameo.Logo" : "Kameo.LogoDark") && about.GetVisualDescendants().OfType<Image>().Single().Source != null, "The logo does not match the palette.");
+                        Check(about.GetVisualDescendants().OfType<HyperlinkButton>().Single().NavigateUri?.AbsoluteUri == "https://github.com/jchristn/Kameo", "Repository link is missing.");
+                        Check(!Text(about).Contains("Your agent identities", StringComparison.Ordinal) && !Text(about).Contains("A local credential", StringComparison.Ordinal), "Removed description remains.");
+                        TextBlock copyright = about.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Text == "Copyright (c) 2026 Joel Christner");
+                        TextBlock license = about.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Text == "MIT License");
+                        Check(license.TranslatePoint(default, about)!.Value.Y - copyright.TranslatePoint(default, about)!.Value.Y - copyright.Bounds.Height >= 16, "Copyright and license need more space.");
+                        Click(Button(about, "Close")); Check(!about.IsVisible, "About did not close.");
+                    }
+                }
+                finally { Palette.Apply(Application.Current!, originalDark, originalScheme); }
+            });
+            AddAsync("SplashClosesAfterTwoSecondsButAboutStaysOpen", async (window, store, cancellationToken) =>
+            {
+                AboutWindow splash = new AboutWindow(splash: true); splash.Show(window);
+                window.ShowAbout(); AboutWindow about = window.OwnedWindows.OfType<AboutWindow>().Single(child => child != splash);
+                await Task.Delay(1100, cancellationToken); Check(splash.IsVisible, "Splash closed before two seconds.");
+                await Task.Delay(1200, cancellationToken); Dispatcher.UIThread.RunJobs();
+                Check(!splash.IsVisible && about.IsVisible && window.IsVisible, "Splash timing closed the wrong window or did not dismiss.");
+                about.Close();
+                AboutWindow dismissed = new AboutWindow(splash: true); dismissed.Show(window); dismissed.Close();
+                await Task.Delay(2100, cancellationToken); Check(window.IsVisible, "An early-closed splash affected the manager.");
             });
             Add("HarnessNavigation", (window, store) =>
             {
@@ -256,6 +334,13 @@ namespace Test.Desktop
         private static string Text(Window window) { Sync(window); return string.Join("\n", window.GetVisualDescendants().OfType<TextBlock>().Select(text => text.Text)); }
         private static void Sync(Window window) { window.UpdateLayout(); Dispatcher.UIThread.RunJobs(); window.UpdateLayout(); }
         private static void Click(Button button) { button.RaiseEvent(new RoutedEventArgs(Avalonia.Controls.Button.ClickEvent)); Dispatcher.UIThread.RunJobs(); }
+        private static void Click(NativeMenuItem item)
+        {
+            ((INativeMenuItemExporterEventsImplBridge)item).RaiseClicked();
+            Dispatcher.UIThread.RunJobs();
+        }
+        private static NativeMenu HarnessMenu(MainWindow window, HarnessKind harness) => NativeMenu.GetMenu(window)!.Items.OfType<NativeMenuItem>()
+            .Single(item => item.Header == "Profiles").Menu!.Items.OfType<NativeMenuItem>().Single(item => item.Header == HarnessCatalog.Name(harness)).Menu!;
         private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     }
 }

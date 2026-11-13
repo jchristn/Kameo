@@ -17,7 +17,8 @@ Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. I
 - Shared Mux endpoints files: choose one JSON file for multiple profiles and pick up source changes at the next launch.
 - Tray selection, search, launch-folder selection, and a compact desktop manager.
 - 16 palettes with coordinated light and dark backgrounds, panels, and accents: Fern, Ocean, Iris, Amber, Rose, Graphite, Seafoam, Lagoon, Cobalt, Lavender, Coral, Sand, Espresso, Midnight, Paper, and Nord.
-- Native macOS application menus, including About, Edit, Profiles, View, Window, and Quit.
+- Native macOS application menus, including About, Edit, Profiles, View, Window, and Quit. Profiles submenus launch the selected account in your saved folder or a folder chosen for that session.
+- Palette-aware About and two-second startup splash screens with the project logo and GitHub link. Background tray startup stays unobtrusive.
 - Plaintext local storage under `~/.kameo/`, with owner-only Unix permissions.
 - No account, hosted service, or credential synchronization required.
 

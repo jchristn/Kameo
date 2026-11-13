@@ -76,7 +76,11 @@ namespace Kameo.Desktop
                 _Timer.Start();
                 desktop.Exit += (_, _) => { _Timer.Stop(); _Tray.Dispose(); };
                 // Always show the manager on platforms where a tray host may be unavailable (including WSLg).
-                if (!(desktop.Args?.Contains("--tray") == true) || OperatingSystem.IsLinux()) _Window.Show();
+                if (!(desktop.Args?.Contains("--tray") == true) || OperatingSystem.IsLinux())
+                {
+                    _Window.Show();
+                    new AboutWindow(splash: true).Show(_Window);
+                }
                 if (TryGetFeature(typeof(IActivatableLifetime)) is IActivatableLifetime activatable)
                     activatable.Activated += (_, _) => Show();
             }

@@ -9,6 +9,7 @@ namespace Kameo.Desktop
     using System.Threading.Tasks;
     using Avalonia;
     using Avalonia.Controls;
+    using Avalonia.Data;
     using Avalonia.Layout;
     using Avalonia.Input.Platform;
     using Avalonia.Media;
@@ -31,6 +32,7 @@ namespace Kameo.Desktop
         private string _Fingerprint = "";
         private string _Workspace;
         private Bitmap? _Logo;
+        private readonly Dictionary<HarnessKind, NativeMenu> _HarnessMenus = new Dictionary<HarnessKind, NativeMenu>();
 
         /// <summary>Creates the manager for a local profile store.</summary>
         public MainWindow(ProfileStore store, Action changed, Action quit)
@@ -57,13 +59,7 @@ namespace Kameo.Desktop
         /// <summary>Displays the local product and version information.</summary>
         public void ShowAbout()
         {
-            Window about = new Window { Title = "About Kameo", Width = 450, SizeToContent = SizeToContent.Height, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = Palette.Background };
-            StackPanel content = Ui.Stack(Ui.Text("Kameo", 32, weight: FontWeight.SemiBold), Ui.Badge("0.1.0  ·  ALPHA", true),
-                Ui.Text("Your agent identities, in one place.", 16),
-                Ui.Text("A local credential and profile manager for Claude Code, Codex, Antigravity, and Mux.\n\nCopyright (c) 2026 Joel Christner\nMIT License", 13, Palette.Muted),
-                Ui.Button("Close", about.Close, true));
-            content.Margin = new Thickness(30); about.Content = content;
-            _ = about.ShowDialog(this);
+            _ = new AboutWindow().ShowDialog(this);
         }
 
         private void InstallNativeMenus()
@@ -76,7 +72,11 @@ namespace Kameo.Desktop
             bar.Add(NativeMenus.Edit(this));
             NativeMenu harnesses = new NativeMenu();
             foreach (HarnessKind harness in HarnessCatalog.All)
-                harnesses.Add(NativeMenus.Item(HarnessCatalog.Name(harness), () => { _Harness = harness; Refresh(); }));
+            {
+                NativeMenu choices = new NativeMenu();
+                _HarnessMenus.Add(harness, choices);
+                harnesses.Add(new NativeMenuItem(HarnessCatalog.Name(harness)) { Menu = choices });
+            }
             bar.Add(new NativeMenuItem("Profiles") { Menu = harnesses });
             bar.Add(NativeMenus.Submenu("View",
                 NativeMenus.Item("Refresh Profiles", Refresh, Avalonia.Input.Key.R),
@@ -89,6 +89,24 @@ namespace Kameo.Desktop
                 NativeMenus.Item("Bring All to Front", () => { Activate(); foreach (Window window in OwnedWindows) window.Activate(); })));
             bar.Add(NativeMenus.Submenu("Help", NativeMenus.Item("About Kameo", ShowAbout)));
             NativeMenu.SetMenu(this, bar);
+        }
+
+        private void RefreshProfileMenus(IReadOnlyList<Profile> profiles)
+        {
+            foreach (HarnessKind harness in HarnessCatalog.All)
+            {
+                NativeMenu choices = _HarnessMenus[harness];
+                choices.Items.Clear();
+                Profile? active = profiles.FirstOrDefault(profile => profile.Harness == harness && profile.IsActive);
+                NativeMenuItem launch = NativeMenus.Item(active == null ? "No profile selected" : "Launch " + active.Name,
+                    () => RunAction(() => _OpenTerminal(_Store.Selected(harness).Id, false, _Workspace)));
+                launch.IsEnabled = active != null;
+                NativeMenuItem launchIn = NativeMenus.Item("Launch in...",
+                    () => RunAction(() => { _ = ChooseDirectoryAsync(_Store.Selected(harness).Id, CancellationToken.None); }));
+                launchIn.IsEnabled = active != null;
+                choices.Add(launch); choices.Add(launchIn); choices.Add(new NativeMenuItemSeparator());
+                choices.Add(NativeMenus.Item("Manage profiles...", () => { _Harness = harness; if (_Search != null) _Search.Text = ""; Refresh(); }));
+            }
         }
 
         private void SetAppearance(bool dark)
@@ -113,6 +131,7 @@ namespace Kameo.Desktop
             string search = _Search?.Text ?? "";
             IReadOnlyList<Profile> all = _Store.List();
             _Fingerprint = Fingerprint(all);
+            RefreshProfileMenus(all);
             Background = Palette.Background;
             Foreground = Palette.Text;
             Grid shell = new Grid { ColumnDefinitions = new ColumnDefinitions("170,*") };
@@ -126,12 +145,13 @@ namespace Kameo.Desktop
             add.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(add, 1); heading.Children.Add(add);
 
-            _Search = new TextBox { Name = "SearchProfiles", PlaceholderText = "Search profiles by name", Text = search };
+            _Search = new TextBox { Name = "SearchProfiles", PlaceholderText = "Search profiles by name", Text = search, HorizontalAlignment = HorizontalAlignment.Left };
             _Search.TextChanged += (_, _) => RenderProfiles();
             StackPanel header = Ui.Stack(heading, _Search);
             header.Spacing = 12; header.Margin = new Thickness(0, 0, 0, 12);
             main.Children.Add(header);
-            _Profiles = new StackPanel { Spacing = 10 };
+            _Profiles = new StackPanel { Name = "ProfileCards", Spacing = 10 };
+            _Search.Bind(WidthProperty, new Binding("Bounds.Width") { Source = _Profiles, Mode = BindingMode.OneWay });
             ScrollViewer scroll = new ScrollViewer { Content = _Profiles, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, 8, 4) };
             Grid.SetRow(scroll, 1); main.Children.Add(scroll);
 
