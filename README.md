@@ -97,6 +97,8 @@ After both commands succeed:
 
 Keep the data folder if you want to retain profiles and preferences for a later reinstall. Removing it deletes Kameo's saved credentials, preferences, and profile-specific harness state. If you set `KAMEO_HOME`, use that custom directory instead of the default above. Windows and WSL installations are independent; repeat removal in each environment you used.
 
+If you installed the CLI as a .NET global tool, also run `dotnet tool uninstall --global Kameo.Cli` in each Windows/WSL/macOS/Linux environment where you installed it. This leaves your profiles intact.
+
 Remove any Kameo `PATH` entries, aliases, shortcuts, or symlinks you added manually. The removal steps leave your separately installed harnesses and their original credentials in place. Keep Git and .NET if other applications use them.
 
 ## Add your first profile
@@ -111,7 +113,49 @@ The executable field accepts an executable name, absolute native executable path
 
 ## Launch from a terminal
 
-The platform's `update` script in [Getting started](#getting-started) builds both the GUI and the CLI. It creates `artifacts/cli/kameo` on macOS, Linux, WSL, and WSL2, or `artifacts\cli\kameo.exe` on Windows. The `start` script also builds them if they are missing. **There is no global CLI installation, and the scripts do not add `kameo` to `PATH`.**
+The platform's `update` script in [Getting started](#getting-started) builds both the GUI and the CLI. It creates `artifacts/cli/kameo` on macOS, Linux, WSL, and WSL2, or `artifacts\cli\kameo.exe` on Windows. The `start` script also builds them if they are missing. **These scripts do not install a global tool or add `kameo` to `PATH`.** You can [install the CLI as a global tool](#build-and-install-as-a-net-global-tool) or use the source-build wrapper below.
+
+### Build and install as a .NET global tool
+
+With the .NET 10 SDK installed, run these commands from the clone's root. They work in Windows PowerShell, Command Prompt, macOS, Linux, WSL, and WSL2:
+
+```sh
+dotnet pack src/Kameo.Cli/Kameo.Cli.csproj -c Release -o artifacts/packages
+dotnet tool install --global Kameo.Cli --version 0.1.0 --source ./artifacts/packages
+kameo --version
+```
+
+`dotnet pack` builds the CLI and creates `artifacts/packages/Kameo.Cli.0.1.0.nupkg`. The install command uses that local package; no NuGet publication is needed. The package name is **Kameo.Cli**, and the installed command is **kameo**. Global means available to your current user from any directory. It installs the CLI only; build and start the desktop with the platform scripts above. Keep the .NET 10 runtime installed.
+
+The .NET SDK normally adds its global-tools directory to `PATH`. If `kameo` is not found, reopen your terminal or add it for the current session:
+
+```sh
+# macOS, Linux, WSL, or WSL2 (bash/zsh)
+export PATH="$HOME/.dotnet/tools:$PATH"
+kameo --version
+```
+
+```powershell
+# Windows PowerShell
+$env:Path = (Join-Path $env:USERPROFILE '.dotnet\tools') + ';' + $env:Path
+kameo --version
+```
+
+For future terminals, add `~/.dotnet/tools` to your shell's `PATH`, or `%USERPROFILE%\.dotnet\tools` to your Windows user **Path**. Install separately inside each WSL distribution. Remove an older Kameo alias or `artifacts/cli` PATH entry if it takes precedence over the global command; check with `command -v kameo` on bash/zsh or `Get-Command kameo` in PowerShell.
+
+You can now change to any project directory and run `kameo list`, `kameo codex`, or another harness command. The global CLI uses the same `~/.kameo/` profiles as the desktop, or the directory selected by `KAMEO_HOME`. It runs independently of the clone after installation.
+
+To install a rebuilt copy, run the following from the clone's root. During the alpha, builds retain version `0.1.0`, so uninstall and reinstall to replace that version rather than relying on a version-based update:
+
+```sh
+dotnet pack src/Kameo.Cli/Kameo.Cli.csproj -c Release -o artifacts/packages
+dotnet tool uninstall --global Kameo.Cli
+dotnet tool install --global Kameo.Cli --version 0.1.0 --source ./artifacts/packages --no-http-cache
+```
+
+The platform `update` scripts rebuild the source outputs; they do not replace an installed global tool. To remove just the global command, run `dotnet tool uninstall --global Kameo.Cli`. Your profiles and credentials remain intact. See Microsoft's [.NET tools guide](https://learn.microsoft.com/en-us/dotnet/core/tools/global-tools) for global-tool installation details.
+
+### Use the source-build wrapper or PATH
 
 After building, you can use the CLI immediately from the clone's root without changing `PATH`:
 
@@ -143,7 +187,9 @@ kameo --version
 
 For future terminals, add the absolute directory to your shell's `PATH` configuration (for example, `~/.zshrc` or `~/.bashrc`), or to your user **Path** in Windows Environment Variables, then open a new terminal. Configure it separately inside each WSL distribution. Keep the clone at that location; update the entry if you move it.
 
-The examples below assume `PATH` is configured. Otherwise, replace `kameo` with the wrapper's path above or the absolute path to the built CLI.
+### Launch a harness
+
+The examples below assume the global tool is installed or `PATH` is configured. Otherwise, replace `kameo` with the wrapper's path above or the absolute path to the built CLI.
 
 ```sh
 kameo claude

@@ -1,4 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><AssemblyName>kameo</AssemblyName><IsAotCompatible>true</IsAotCompatible></PropertyGroup>
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>kameo</ToolCommandName>
+    <PackageId>Kameo.Cli</PackageId>
+    <Description>Local agent credential profiles and isolated launch commands for Kameo.</Description>
+    <RepositoryUrl>https://github.com/jchristn/Kameo</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup><None Include="../../README.md" Pack="true" PackagePath="/" /></ItemGroup>
   <ItemGroup><ProjectReference Include="../Kameo.Core/Kameo.Core.csproj" /></ItemGroup>
 </Project>

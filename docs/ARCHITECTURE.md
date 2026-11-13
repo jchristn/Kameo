@@ -12,7 +12,7 @@
 | `Test.Desktop` | Touchstone UI workflows and native lifecycle smoke testing |
 | `Test.Harness` | Disposable synthetic child executable for argument, environment, exit-code and cancellation tests |
 
-There is no HTTP server, remote account service, database server, or web dashboard. The backend reference's HTTP, multitenancy, Docker, REST/MCP, Postman, and four database-provider requirements do not apply to this local filesystem application. Installers and package-manager distribution are explicitly excluded by the product requirements. Source version is `0.1.0`, with alpha status in documentation and the UI.
+There is no HTTP server, remote account service, database server, or web dashboard. The backend reference's HTTP, multitenancy, Docker, REST/MCP, Postman, and four database-provider requirements do not apply to this local filesystem application. Prebuilt installers are not distributed. Users can build the CLI as a local `Kameo.Cli` .NET tool package and install the `kameo` command for their user; this does not install or update the desktop. Source version is `0.1.0`, with alpha status in documentation and the UI.
 
 ## Storage and concurrency
 
