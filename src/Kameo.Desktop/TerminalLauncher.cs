@@ -46,6 +46,9 @@ namespace Kameo.Desktop
         private static string FindCli()
         {
             string filename = OperatingSystem.IsWindows() ? "kameo.exe" : "kameo";
+            // Installers place the CLI beside the desktop executable (and inside the macOS bundle's MacOS directory).
+            string installed = Path.Combine(AppContext.BaseDirectory, filename);
+            if (File.Exists(installed)) return installed;
             string sibling = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "cli", filename));
             if (File.Exists(sibling)) return sibling;
             string bundleSibling = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "cli", filename));

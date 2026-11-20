@@ -1,4 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType><PublishAot>true</PublishAot></PropertyGroup>
+  <PropertyGroup><OutputType>Exe</OutputType><PublishAot>true</PublishAot><!-- Test.Shared references the Kameo.Publisher console app as a library. --><ValidateExecutableReferencesMatchSelfContained>false</ValidateExecutableReferencesMatchSelfContained></PropertyGroup>
   <ItemGroup><ProjectReference Include="../Test.Shared/Test.Shared.csproj" /><PackageReference Include="Touchstone.Cli" Version="1.0.0" /></ItemGroup>
 </Project>

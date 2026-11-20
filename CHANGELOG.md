@@ -1,6 +1,12 @@
 # Changelog
 
-## v0.1.0 · Alpha · 2026-11-12
+All notable changes to Kameo are recorded here. Versions follow [Semantic Versioning](https://semver.org); every 0.x.y release is an alpha.
+
+## [Unreleased]
+
+## [0.1.0] - 2026-11-20
+
+Alpha. Initial release.
 
 - Initial C# and Avalonia desktop, tray, and command-line applications.
 - API-key profiles for Claude Code, Codex, Antigravity, and Mux; native logins for Claude Code, Codex, and Antigravity; endpoint-file profiles for Mux.
@@ -13,5 +19,7 @@
 - Profile launch submenus, search width aligned with profile cards, and a shared About/startup splash design with palette-aware logos and a repository link.
 - Source-build lifecycle scripts for Windows, macOS, Linux, WSL, and WSL2.
 - Optional local .NET global-tool packaging for the `kameo` command, with build, install, rebuild, PATH, and removal instructions.
+- Unsigned installers for Windows, macOS, and Linux on x64 and ARM64: Inno Setup `.exe` and portable `.zip`; ad-hoc-signed `.pkg`, `.dmg`, and `.tar.gz`; `.deb`, `.rpm`, AppImage, and `.tar.gz`. Installers add `kameo` to `PATH` and register the tray app at sign-in. Built by `Kameo.Publisher` from `publisher.json` and published by a tag-triggered release workflow with `SHA256SUMS`.
+- The desktop finds the CLI installed beside it before falling back to source-build locations and `PATH`.
 - Shared Touchstone suites, xUnit v3, NUnit, desktop workflows, native startup smoke tests, and native AOT coverage.
 - MIT-licensed source distribution with installation, usage, troubleshooting, and issue-reporting documentation.

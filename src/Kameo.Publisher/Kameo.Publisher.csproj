@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Kameo.Publisher</AssemblyName>
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Builds Kameo's installers and portable archives from publisher.json.</Description>
+  </PropertyGroup>
+</Project>

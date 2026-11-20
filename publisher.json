@@ -1,0 +1,69 @@
+{
+  "project": {
+    "name": "Kameo",
+    "command": "kameo",
+    "identifier": "ai.latticetech.kameo",
+    "tagline": "A small desktop and tray application for switching agent credentials.",
+    "description": "Keep work, personal, and client identities for Claude Code, Codex, Antigravity, and Mux in separate profiles, choose one, and launch your agent through Kameo. New sessions use the selected profile; existing sessions keep theirs.",
+    "license": "MIT",
+    "licenseFile": "LICENSE.md",
+    "logo": "assets/logo-dark.png",
+    "logoDark": "assets/logo-white.png",
+    "publisher": "Lattice AI, LLC",
+    "publisherUrl": "https://latticetech.ai",
+    "repositoryUrl": "https://github.com/jchristn/Kameo",
+    "copyright": "Copyright (c) 2026 Joel Christner",
+    "versionFile": "Directory.Build.props",
+    "changelog": "CHANGELOG.md",
+    "installNotes": ".github/release-install-notes.md"
+  },
+  "framework": "net10.0",
+  "runtimes": [ "win-x64", "win-arm64", "osx-x64", "osx-arm64", "linux-x64", "linux-arm64" ],
+  "artifacts": [
+    { "name": "cli", "project": "src/Kameo.Cli/Kameo.Cli.csproj", "executable": "kameo", "kind": "cli" },
+    { "name": "desktop", "project": "src/Kameo.Desktop/Kameo.Desktop.csproj", "executable": "Kameo.Desktop", "kind": "tray" }
+  ],
+  "channels": [ "zip", "inno", "app", "tarball", "pkg", "dmg", "deb", "rpm", "appimage" ],
+  "prereleaseBeforeOne": false,
+  "agent": {
+    "label": "ai.latticetech.kameo.agent",
+    "windowsName": "Kameo Agent",
+    "arguments": [ "--tray" ]
+  },
+  "linux": {
+    "installDirectory": "/opt/kameo",
+    "category": "utils",
+    "desktopCategories": "Utility;Development;",
+    "debDependencies": [
+      "libicu78 | libicu77 | libicu76 | libicu75 | libicu74 | libicu73 | libicu72 | libicu71 | libicu70 | libicu69 | libicu67 | libicu66",
+      "libfontconfig1",
+      "libx11-6",
+      "libice6",
+      "libsm6",
+      "libxext6",
+      "libxrender1",
+      "libxrandr2",
+      "libxi6",
+      "libxcursor1"
+    ],
+    "rpmDependencies": [ "libicu", "fontconfig", "libX11", "libICE", "libSM", "libXext", "libXrender", "libXrandr", "libXi", "libXcursor" ]
+  },
+  "macos": {
+    "minimumSystemVersion": "12.0",
+    "commandDirectory": "/usr/local/bin"
+  },
+  "signing": {
+    "windows": {
+      "isConfigured": false,
+      "certificateEnvironment": "WINDOWS_SIGNING_PFX",
+      "passwordEnvironment": "WINDOWS_SIGNING_PASSWORD",
+      "timestampUrl": "http://timestamp.digicert.com"
+    },
+    "macos": {
+      "isConfigured": false,
+      "identity": "",
+      "installerIdentity": "",
+      "notaryProfile": ""
+    }
+  }
+}
