@@ -31,6 +31,13 @@ namespace Test.Shared
             throw new InvalidOperationException("Expected exception: " + typeof(T).Name);
         }
 
+        internal static async System.Threading.Tasks.Task ThrowsAsync<T>(Func<System.Threading.Tasks.Task> action) where T : Exception
+        {
+            try { await action().ConfigureAwait(false); }
+            catch (T) { return; }
+            throw new InvalidOperationException("Expected exception: " + typeof(T).Name);
+        }
+
         internal static string Probe()
         {
             string? configured = Environment.GetEnvironmentVariable("KAMEO_TEST_PROBE");

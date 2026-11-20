@@ -6,7 +6,7 @@
 
 Kameo is a small desktop and tray application for switching agent credentials. Keep work, personal, and client identities in separate profiles, choose one, and launch your agent through Kameo. New sessions use the selected profile; existing sessions keep theirs.
 
-Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. Includes a terminal CLI that works without the desktop running. MIT licensed. Clone and build from source; there are no installers.
+Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. Includes a terminal CLI that works without the desktop running. MIT licensed. [Download an installer](#download-an-installer) for Windows, macOS, or Linux, or [build from source](#install-from-source).
 
 ## Features
 
@@ -35,6 +35,32 @@ Captured on macOS with sample profiles. Click an image to view it at full size.
 | [![Appearance picker showing all sixteen palettes and light and dark mode controls](docs/screenshots/appearance.jpg)](docs/screenshots/appearance.jpg) | [![About Kameo with the contrasting logo, alpha version, GitHub link, copyright, and MIT license](docs/screenshots/about.jpg)](docs/screenshots/about.jpg) |
 
 ## Getting started
+
+### Download an installer
+
+Get the latest build from the [Releases page](https://github.com/jchristn/Kameo/releases). Kameo 0.x releases are alphas, so GitHub lists them as pre-releases. Every installer includes the desktop and tray app and the `kameo` command, with no separate .NET runtime required.
+
+| Platform | File |
+| --- | --- |
+| Windows (x64, ARM64) | `kameo-<version>-win-x64-setup.exe`, `kameo-<version>-win-arm64-setup.exe` |
+| macOS (Apple Silicon, Intel) | `kameo-<version>-osx-arm64.pkg`, `kameo-<version>-osx-x64.pkg` (or `.dmg`) |
+| Debian, Ubuntu | `kameo_<version>_amd64.deb`, `kameo_<version>_arm64.deb` |
+| Fedora, RHEL | `kameo-<version>-1.x86_64.rpm`, `kameo-<version>-1.aarch64.rpm` |
+| Any Linux | `kameo-<version>-x86_64.AppImage`, `kameo-<version>-aarch64.AppImage` |
+| Scripts and containers | `kameo-<version>-<rid>.tar.gz`, `kameo-<version>-win-<arch>.zip` |
+
+The Windows installer and macOS `.pkg` add `kameo` to `PATH` and start Kameo in the tray at sign-in (optional on Windows). The `.deb` and `.rpm` add `/usr/bin/kameo`, a menu entry, and login autostart. Package-manager installs (`winget`, Homebrew, `apt`/`dnf` repositories) are planned but not available yet.
+
+> [!IMPORTANT]
+> **These builds are not code-signed, so Windows and macOS block the first launch.** This is expected and does not mean the download is damaged. To confirm a file is the one published, check it against `SHA256SUMS`.
+
+Kameo is free, open-source software and is not code-signed (signing certificates are an ongoing cost we choose not to pass on).
+
+- **macOS: "Kameo" Not Opened.** macOS says *Apple could not verify "Kameo" is free of malware that may harm your Mac or compromise your privacy.* Click **Done** (not Move to Trash), open **System Settings > Privacy & Security**, scroll to **Security**, click **Open Anyway** next to *"Kameo" was blocked to protect your Mac*, then click **Open Anyway** again and enter your password. The button only appears for about an hour after the blocked attempt. On macOS 15 and later, Control-click > **Open** no longer works. In Terminal, `xattr -dr com.apple.quarantine ~/Downloads/kameo-<version>-osx-arm64.pkg` before opening the `.pkg` skips the prompt.
+- **Windows: "Windows protected your PC".** Click **More info**, then **Run anyway**. If your browser warns that the file *isn't commonly downloaded*, choose **Keep**. Run `Unblock-File` on a `.zip` before extracting it.
+- **Linux:** no prompt. `sudo apt install ./kameo_<version>_amd64.deb` (keep the `./`), `sudo dnf install ./kameo-<version>-1.x86_64.rpm`, or `chmod +x` the AppImage.
+
+[INSTALL.md](INSTALL.md) covers every format, uninstalling, and checksum verification.
 
 ### Install from source
 
@@ -70,6 +96,8 @@ Install Kameo in Windows **or inside a WSL distribution**, using the correspondi
 WSL2 can use WSLg or an external X server. WSL1 needs an external X server. WSLg alone does not provide a conventional desktop tray, so use the manager window. The CLI works in headless WSL. WSL startup registration adds a marked block to `.bashrc` and `.zshrc`; it starts the app from an interactive shell only when a graphical display is available.
 
 ### Remove Kameo by OS
+
+If you used an installer, follow the uninstall steps for your OS in [INSTALL.md](INSTALL.md). The steps below are for source builds.
 
 Close agent sessions launched through Kameo before removing it. If you want to erase saved credentials as well, delete the profiles in Kameo **before** stopping the app. On macOS, this also removes each Claude profile's scoped Keychain entry; deleting the data folder alone does not remove those entries.
 
@@ -357,11 +385,11 @@ dotnet publish src/Test.Aot -c Release -r osx-arm64 -o artifacts/aot
 ./artifacts/aot/Test.Aot --results artifacts/reports/aot.json
 ```
 
-Use `linux-x64`, `linux-arm64`, `win-x64`, `win-arm64`, or `osx-x64` as appropriate. The Avalonia desktop is shipped from source as a normal .NET build; its UI tests run separately, not inside the native core test binary.
+Use `linux-x64`, `linux-arm64`, `win-x64`, `win-arm64`, or `osx-x64` as appropriate. The Avalonia desktop is not native AOT. Installers ship it as a self-contained single-file .NET build; its UI tests run separately, not inside the native core test binary.
 
 ## Development
 
-All code and tests live under `src/`. See [architecture and integration notes](docs/ARCHITECTURE.md), [test coverage](TESTING.md), [contributor conventions](AGENTS.md), and the [changelog](CHANGELOG.md). The UI currently ships in English. This is an alpha release; real browser login still requires the user's provider account and consent.
+All code and tests live under `src/`. `Kameo.Publisher` builds the installers from [`publisher.json`](publisher.json); run `./build-installers.sh` or `build-installers.bat` to build the formats your OS supports, and see [RELEASING.md](RELEASING.md) for publishing a release. See [architecture and integration notes](docs/ARCHITECTURE.md), [test coverage](TESTING.md), [contributor conventions](AGENTS.md), and the [changelog](CHANGELOG.md). The UI currently ships in English. This is an alpha release; real browser login still requires the user's provider account and consent.
 
 ## License
 

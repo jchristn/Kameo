@@ -1,0 +1,162 @@
+name: Release
+
+# Tag push (v<version>): build every installer on its own OS, then publish one GitHub Release with all of them.
+# Manual run or release-check: build everything and stop before publishing (a dry run).
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  check:
+    name: Check tag and changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build Publisher
+        run: dotnet build src/Kameo.Publisher -c Release
+      - name: Verify tag matches version and changelog
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: dotnet run --project src/Kameo.Publisher -c Release --no-build -- --channel verify-release --tag "${{ github.ref_name }}"
+      - name: Show channels
+        run: dotnet run --project src/Kameo.Publisher -c Release --no-build -- --channel list
+
+  windows:
+    name: Windows installers
+    needs: check
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build Publisher
+        run: dotnet build src/Kameo.Publisher -c Release
+      - name: Publish, zip, and Inno Setup
+        run: dotnet run --project src/Kameo.Publisher -c Release --no-build -- --channel publish,zip,inno
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-windows
+          path: installers/
+          if-no-files-found: error
+          compression-level: 0
+
+  macos:
+    name: macOS installers
+    needs: check
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build Publisher
+        run: dotnet build src/Kameo.Publisher -c Release
+      - name: Publish, sign ad-hoc, and package
+        run: dotnet run --project src/Kameo.Publisher -c Release --no-build -- --channel publish,app,tarball,pkg,dmg
+      - name: Check the ad-hoc signature
+        run: |
+          app="$(find artifacts/publisher -path '*osx-arm64/app/Kameo.app' -maxdepth 6 | head -n 1)"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --verbose=4 "$app" 2>&1 | tee spctl.txt || true
+          if grep -qiE 'damaged|invalid signature' spctl.txt; then echo 'The ad-hoc signature is broken; users would see the "damaged" dead end.'; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-macos
+          path: installers/
+          if-no-files-found: error
+          compression-level: 0
+
+  linux:
+    name: Linux installers
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install packaging tools
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get update
+          sudo -E apt-get install -y rpm ruby ruby-dev build-essential desktop-file-utils file
+          sudo gem install --no-document fpm
+          sudo curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          sudo chmod +x /usr/local/bin/appimagetool
+      - name: Build Publisher
+        run: dotnet build src/Kameo.Publisher -c Release
+      - name: Publish and package
+        run: dotnet run --project src/Kameo.Publisher -c Release --no-build -- --channel publish,tarball,deb,rpm,appimage
+      - name: Inspect packages
+        run: |
+          dpkg-deb --info installers/*/kameo_*_amd64.deb
+          dpkg-deb --contents installers/*/kameo_*_amd64.deb
+          rpm -qip installers/*/kameo-*.x86_64.rpm
+          rpm -qlp installers/*/kameo-*.x86_64.rpm
+      - name: Install the .deb and run the command
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ./installers/*/kameo_*_amd64.deb
+          kameo --version
+          sudo DEBIAN_FRONTEND=noninteractive apt-get remove -y kameo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-linux
+          path: installers/
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: Publish GitHub Release
+    needs: [ windows, macos, linux ]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: installers/
+          merge-multiple: true
+      - name: Build Publisher
+        run: dotnet build src/Kameo.Publisher -c Release
+      - name: Verify tag, changelog, and every platform's files
+        id: verify
+        run: |
+          dotnet run --project src/Kameo.Publisher -c Release --no-build -- --channel verify-release --tag "${{ github.ref_name }}"
+          dotnet run --project src/Kameo.Publisher -c Release --no-build -- --channel checksums,verify-assets,notes --notes-output release-notes.md
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.verify.outputs.name }}
+          body_path: release-notes.md
+          prerelease: ${{ steps.verify.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.verify.outputs.prerelease == 'true' && 'false' || 'true' }}
+          draft: false
+          fail_on_unmatched_files: true
+          files: installers/${{ steps.verify.outputs.version }}/*
