@@ -24,7 +24,7 @@
     { "name": "desktop", "project": "src/Kameo.Desktop/Kameo.Desktop.csproj", "executable": "Kameo.Desktop", "kind": "tray" }
   ],
   "channels": [ "zip", "inno", "app", "tarball", "pkg", "dmg", "deb", "rpm", "appimage" ],
-  "prereleaseBeforeOne": true,
+  "prereleaseBeforeOne": false,
   "agent": {
     "label": "ai.latticetech.kameo.agent",
     "windowsName": "Kameo Agent",

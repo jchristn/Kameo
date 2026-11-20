@@ -11,7 +11,8 @@ bundles and binaries are ad-hoc signed so they run at all.
 `.tar.gz`; for Linux x64 and ARM64, a `.deb`, an `.rpm`, an AppImage, and a `.tar.gz`; plus `SHA256SUMS`. The
 release job refuses to publish if any file is missing (`--channel verify-assets`). The title is `Kameo <version>`, the
 notes open with the install instructions from [`.github/release-install-notes.md`](.github/release-install-notes.md)
-followed by the version's `CHANGELOG.md` section, and 0.x versions are marked **Pre-release**.
+followed by the version's `CHANGELOG.md` section. Releases get the **Latest** badge; a version with a suffix such as
+`-rc.1` is marked **Pre-release** (`prereleaseBeforeOne` in `publisher.json` is `false`, so plain 0.x versions are Latest).
 
 ## Steps
 
@@ -54,7 +55,7 @@ followed by the version's `CHANGELOG.md` section, and 0.x versions are marked **
 
    Check that the title is `Kameo <version>`, the notes open with **Installing** with no `{version}` left, all 19
    files are present, the tag points at the release commit (`git rev-list -n 1 v<version>`), and the release is marked
-   Pre-release for 0.x versions.
+   **Latest** (or **Pre-release** for a suffixed version).
 
 ## When something goes wrong
 

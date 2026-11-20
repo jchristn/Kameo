@@ -38,7 +38,7 @@ Captured on macOS with sample profiles. Click an image to view it at full size.
 
 ### Download an installer
 
-Get the latest build from the [Releases page](https://github.com/jchristn/Kameo/releases). Kameo 0.x releases are alphas, so GitHub lists them as pre-releases. Every installer includes the desktop and tray app and the `kameo` command, with no separate .NET runtime required.
+Get the latest build from the [Releases page](https://github.com/jchristn/Kameo/releases/latest). Kameo 0.x releases are alphas. Every installer includes the desktop and tray app and the `kameo` command, with no separate .NET runtime required.
 
 | Platform | File |
 | --- | --- |

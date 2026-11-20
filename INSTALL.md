@@ -1,8 +1,7 @@
 # Installing Kameo
 
 Kameo ships installers for Windows, macOS, and Linux on x64 and ARM64. Download them from the
-[Releases page](https://github.com/jchristn/Kameo/releases). Every 0.x release is an **alpha**, so GitHub lists it
-as a pre-release. Each installer includes both the desktop and tray app and the `kameo` command-line tool. Neither
+[Releases page](https://github.com/jchristn/Kameo/releases/latest). Every 0.x release is an **alpha**. Each installer includes both the desktop and tray app and the `kameo` command-line tool. Neither
 needs a separate .NET runtime. To build from source instead, see
 [Install from source](README.md#install-from-source).
 
