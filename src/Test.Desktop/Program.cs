@@ -463,7 +463,7 @@ namespace Test.Desktop
                 store.Create(new Profile { Harness = HarnessKind.Claude, Kind = CredentialKind.Native, Name = "Native" });
                 window.Refresh(); Sync(window);
                 Check(!window.GetVisualDescendants().OfType<Button>().Any(button => button.Content as string is "Import..." or "Import current" or "Edit" or "Delete"), "Import, edit and delete should not be separate text buttons.");
-                DropDownButton import = window.GetVisualDescendants().OfType<DropDownButton>().Single(button => button.Content as string == "Import");
+                Button import = Button(window, "Import");
                 Check(import.Flyout is MenuFlyout menu && menu.Items.OfType<MenuItem>().Select(item => item.Header as string).SequenceEqual(new[] { "Current Claude Code login", "Credential file..." }), "Import should offer the current login and a credential file.");
                 Button edit = Button(window, "Edit"); Button delete = Button(window, "Delete"); Button launch = Button(window, "Launch");
                 Check(edit.Content is PathIcon && delete.Content is PathIcon && ToolTip.GetTip(edit) as string == "Edit profile" && ToolTip.GetTip(delete) as string == "Delete profile", "Edit and delete should be labelled icons.");
@@ -472,6 +472,8 @@ namespace Test.Desktop
                 double cardRight = Left(card) + card.Bounds.Width;
                 Check(Left(edit) > Left(import) && Left(delete) > Left(edit) && cardRight - (Left(delete) + delete.Bounds.Width) < 20, "Edit and delete should sit at the far right of the card.");
                 Check(Left(launch) < Left(import), "Launch should come first.");
+                Check(window.GetVisualDescendants().OfType<Button>().Where(button => button.IsVisible && button.GetVisualDescendants().Contains(edit) == false && card.GetVisualDescendants().Contains(button))
+                    .All(button => Math.Abs(button.Bounds.Height - launch.Bounds.Height) < 0.5), "Every card button, including Import and the icons, should share one height: " + string.Join(", ", card.GetVisualDescendants().OfType<Button>().Select(button => (Avalonia.Automation.AutomationProperties.GetName(button) ?? button.Content as string) + "=" + button.Bounds.Height)));
             });
             return await ConsoleRunner.RunMainAsync(new[] { new TestSuiteDescriptor("Desktop", "Desktop workflows and native menu contracts", cases) }, args).ConfigureAwait(false);
         }

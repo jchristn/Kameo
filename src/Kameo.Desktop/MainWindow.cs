@@ -377,7 +377,12 @@ namespace Kameo.Desktop
             MenuFlyout menu = new MenuFlyout();
             menu.Items.Add(current);
             menu.Items.Add(file);
-            DropDownButton import = new DropDownButton { Content = "Import", Flyout = menu, Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand) };
+            // A plain Button keeps the shared button height; DropDownButton's template is taller.
+            TextBlock label = new TextBlock { Text = "Import", VerticalAlignment = VerticalAlignment.Center };
+            PathIcon chevron = new PathIcon { Data = StreamGeometry.Parse(Ui.ChevronIcon), Width = 9, Height = 9, VerticalAlignment = VerticalAlignment.Center };
+            StackPanel content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { label, chevron } };
+            Button import = new Button { Content = content, Flyout = menu, Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand) };
+            Avalonia.Automation.AutomationProperties.SetName(import, "Import");
             ToolTip.SetTip(import, "Copy an existing login into this profile, from this computer's current login or a native credential file.");
             return import;
         }

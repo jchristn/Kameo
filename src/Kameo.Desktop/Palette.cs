@@ -73,10 +73,6 @@ namespace Kameo.Desktop
             {
                 Setters = { new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(6)), new Setter(TemplatedControl.PaddingProperty, new Thickness(10, 6)), new Setter(TemplatedControl.FontSizeProperty, 12d) }
             });
-            app.Styles.Add(new Style(selector => selector.OfType<DropDownButton>())
-            {
-                Setters = { new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(6)), new Setter(TemplatedControl.PaddingProperty, new Thickness(10, 3, 6, 3)), new Setter(TemplatedControl.FontSizeProperty, 12d) }
-            });
             app.Styles.Add(new Style(selector => selector.OfType<TextBox>())
             {
                 Setters = { new Setter(TemplatedControl.CornerRadiusProperty, new CornerRadius(6)), new Setter(TemplatedControl.PaddingProperty, new Thickness(10, 7)), new Setter(TemplatedControl.FontSizeProperty, 13d) }
