@@ -19,6 +19,9 @@ namespace Test.Shared
             void Add(string name, Action<Fixture> execute) => cases.Add(KameoSuites.Case("Launch", name, execute));
             foreach (HarnessKind harness in HarnessCatalog.All)
             {
+                foreach (CredentialKind kind in new[] { CredentialKind.ApiKey, CredentialKind.Native })
+                    cases.Add(KameoSuites.Case("Launch", "ConcurrentSameProfile" + harness + kind,
+                        (fixture, cancellationToken) => ConcurrentSessionsAsync(fixture, harness, kind, cancellationToken)));
                 Add("ApiEnvironment" + harness, fixture =>
                 {
                     Profile profile = fixture.Add(harness);
@@ -115,21 +118,116 @@ namespace Test.Shared
                 Fixture.Check(data["arguments"]!.AsArray().Any(value => value?.GetValue<string>() == "$(not-a-shell)"), "Argument was interpreted by a shell.");
                 Fixture.Check(data["arguments"]!.AsArray().Last()?.GetValue<string>() == "", "Empty argument was lost.");
             }));
-            cases.Add(KameoSuites.Case("Launch", "CancellationReleasesLease", async (fixture, cancellationToken) =>
+            cases.Add(KameoSuites.Case("Launch", "CancellationPreservesSiblingLease", async (fixture, cancellationToken) =>
             {
                 Profile profile = fixture.Add(); profile.Executable = Fixture.Probe(); fixture.Store.Update(profile);
                 string output = Path.Combine(fixture.Root, "capture.json");
+                string siblingOutput = Path.Combine(fixture.Root, "sibling.json");
                 using CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                using CancellationTokenSource siblingCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 Task<int> running = new LaunchService(fixture.Store).RunAsync(profile.Id, new[] { "--capture", output, "--sleep" }, false, cancellation.Token);
-                for (int attempt = 0; attempt < 100 && !File.Exists(output); attempt++) await Task.Delay(30, cancellationToken).ConfigureAwait(false);
-                Fixture.Check(File.Exists(output), "Probe failed to start.");
-                Fixture.Throws<InvalidOperationException>(() => fixture.Store.Update(profile));
-                cancellation.Cancel();
-                try { await running.ConfigureAwait(false); throw new InvalidOperationException("Expected cancellation."); }
-                catch (OperationCanceledException) { }
+                Task<int> sibling = new LaunchService(fixture.Store).RunAsync(profile.Id, new[] { "--capture", siblingOutput, "--sleep" }, false, siblingCancellation.Token);
+                try
+                {
+                    for (int attempt = 0; attempt < 100 && (!File.Exists(output) || !File.Exists(siblingOutput)); attempt++)
+                        await Task.Delay(30, cancellationToken).ConfigureAwait(false);
+                    Fixture.Check(File.Exists(output) && File.Exists(siblingOutput), "Both probes must start.");
+                    Fixture.Throws<InvalidOperationException>(() => fixture.Store.Update(profile));
+                    cancellation.Cancel();
+                    await Fixture.ThrowsAsync<OperationCanceledException>(async () => await running.ConfigureAwait(false)).ConfigureAwait(false);
+                    Fixture.Check(!sibling.IsCompleted, "Canceling a session stopped its sibling.");
+                    Fixture.Throws<InvalidOperationException>(() => fixture.Store.Update(profile));
+                }
+                finally
+                {
+                    cancellation.Cancel(); siblingCancellation.Cancel();
+                    try { await Task.WhenAll(running, sibling).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { }
+                }
+                fixture.Store.Update(profile);
+            }));
+            cases.Add(KameoSuites.Case("Launch", "LoginBlocksConcurrentLaunch", async (fixture, cancellationToken) =>
+            {
+                Profile profile = fixture.Add(kind: CredentialKind.Native); profile.Executable = Fixture.Probe(); fixture.Store.Update(profile);
+                string output = Path.Combine(fixture.Root, "login.json");
+                using CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                Task<int> login = new LaunchService(fixture.Store).RunAsync(profile.Id, new[] { "--capture", output, "--sleep" }, true, cancellation.Token);
+                try
+                {
+                    for (int attempt = 0; attempt < 100 && !File.Exists(output); attempt++) await Task.Delay(30, cancellationToken).ConfigureAwait(false);
+                    Fixture.Check(File.Exists(output), "Login probe failed to start.");
+                    await Fixture.ThrowsAsync<InvalidOperationException>(() => new LaunchService(fixture.Store).RunAsync(profile.Id, Array.Empty<string>(), false, cancellationToken)).ConfigureAwait(false);
+                }
+                finally
+                {
+                    cancellation.Cancel();
+                    try { await login.ConfigureAwait(false); }
+                    catch (OperationCanceledException) { }
+                }
                 fixture.Store.Update(profile);
             }));
             return new TestSuiteDescriptor("Launch", "Harness isolation and real child processes", cases);
+        }
+
+        private static async Task ConcurrentSessionsAsync(Fixture fixture, HarnessKind harness, CredentialKind kind, CancellationToken cancellationToken)
+        {
+            Profile profile = fixture.Add(harness, kind: kind);
+            profile.Executable = Fixture.Probe();
+            fixture.Store.Update(profile);
+            if (harness == HarnessKind.Mux && kind == CredentialKind.ApiKey)
+                new CredentialFiles(fixture.Store).ConfigureMux(profile.Id, "openai", "https://example.test", "test-model");
+            // Claude native sessions use an empty synthetic profile to avoid writing to macOS Keychain.
+            if (kind == CredentialKind.Native && harness != HarnessKind.Claude)
+                new CredentialFiles(fixture.Store).ImportText(profile.Id, CredentialCases.Document(harness));
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            string firstCapture = Path.Combine(fixture.Root, "first.json");
+            string secondCapture = Path.Combine(fixture.Root, "second.json");
+            string firstStop = Path.Combine(fixture.Root, "first.stop");
+            string secondStop = Path.Combine(fixture.Root, "second.stop");
+            Task<CliResult> first = CliCases.RunAsync(fixture, new[] { "run-profile", profile.Id, "--", "--capture", firstCapture, "--wait-for-file", firstStop, "--exit", "17" }, null, timeout.Token);
+            Task<CliResult> second = CliCases.RunAsync(fixture, new[] { HarnessCatalog.Command(harness), "--", "--capture", secondCapture, "--wait-for-file", secondStop, "--exit", "23" }, null, timeout.Token);
+            try
+            {
+                while (!File.Exists(firstCapture) || !File.Exists(secondCapture))
+                {
+                    Fixture.Check(!first.IsCompleted && !second.IsCompleted, "A same-profile CLI session exited before both harnesses started.");
+                    await Task.Delay(25, timeout.Token).ConfigureAwait(false);
+                }
+                foreach (string capture in new[] { firstCapture, secondCapture })
+                {
+                    JsonNode data = JsonNode.Parse(File.ReadAllText(capture))!;
+                    Fixture.Check(data["environment"]?["KAMEO_PROFILE_ID"]?.GetValue<string>() == profile.Id, "Concurrent child used a different profile.");
+                    string directory = fixture.Store.ProfileDirectory(profile.Id);
+                    string variable = harness switch { HarnessKind.Claude => "CLAUDE_CONFIG_DIR", HarnessKind.Codex => "CODEX_HOME", _ => "MUX_CONFIG_DIR" };
+                    Fixture.Check(harness == HarnessKind.Antigravity
+                        ? data["arguments"]!.AsArray().Any(value => value?.GetValue<string>() == directory)
+                        : data["environment"]?[variable]?.GetValue<string>() == directory, "Concurrent child lost the shared native profile directory.");
+                }
+                Fixture.Throws<InvalidOperationException>(() => fixture.Store.Update(profile));
+                Fixture.Throws<InvalidOperationException>(() => fixture.Store.Delete(profile.Id));
+                if (kind == CredentialKind.Native)
+                {
+                    Fixture.Throws<InvalidOperationException>(() => new CredentialFiles(fixture.Store).ImportText(profile.Id, CredentialCases.Document(harness)));
+                    CliResult login = await CliCases.RunAsync(fixture, new[] { "login", profile.Id }, null, timeout.Token).ConfigureAwait(false);
+                    Fixture.Check(login.ExitCode == 1 && login.Error.Contains("in use", StringComparison.Ordinal), "Login must remain exclusive while sessions run.");
+                }
+                File.WriteAllText(firstStop, "stop");
+                Fixture.Check((await first.ConfigureAwait(false)).ExitCode == 17, "First session lost its exit code.");
+                Fixture.Check(!second.IsCompleted, "Closing one session stopped its sibling.");
+                Fixture.Throws<InvalidOperationException>(() => fixture.Store.Update(profile));
+                CliResult third = await CliCases.RunAsync(fixture, new[] { "run-profile", profile.Id, "--", "--capture", Path.Combine(fixture.Root, "third.json"), "--exit", "7" }, null, timeout.Token).ConfigureAwait(false);
+                Fixture.Check(third.ExitCode == 7, "A new session could not join a remaining session.");
+                File.WriteAllText(secondStop, "stop");
+                Fixture.Check((await second.ConfigureAwait(false)).ExitCode == 23, "Second session lost its exit code.");
+                fixture.Store.Update(profile);
+            }
+            finally
+            {
+                File.WriteAllText(firstStop, "stop");
+                File.WriteAllText(secondStop, "stop");
+                await Task.WhenAll(first, second).ConfigureAwait(false);
+            }
         }
     }
 }

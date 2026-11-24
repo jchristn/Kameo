@@ -93,7 +93,7 @@ namespace Test.Shared
             })
         });
 
-        private static async Task<CliResult> RunAsync(Fixture fixture, string[] arguments, string? input, CancellationToken cancellationToken)
+        internal static async Task<CliResult> RunAsync(Fixture fixture, string[] arguments, string? input, CancellationToken cancellationToken)
         {
             using Process process = new Process { StartInfo = new ProcessStartInfo(Fixture.Cli()) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true } };
             process.StartInfo.ArgumentList.Add("--home"); process.StartInfo.ArgumentList.Add(fixture.Root);

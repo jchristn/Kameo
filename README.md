@@ -311,11 +311,11 @@ kameo edit prf_REPLACE_WITH_ID --endpoints-file /absolute/path/to/endpoints.json
 | Antigravity | Isolated account token file and settings, or selected API key supplied to `agy` | Google accounts require CLI 1.5.7; legacy login files are preserved |
 | Mux | `MUX_CONFIG_DIR` | `endpoints.json`, imported or refreshed from a shared source |
 
-Kameo keeps a stable native directory for each profile, allowing the harness to refresh its own tokens and retain its profile-specific state. It does not copy refreshed tokens back into the original imported login. On macOS, Claude's directory-scoped Keychain entry is restored from the profile's file before launch and snapshotted after exit. Deleting that profile also removes its scoped Keychain entry, leaving the default login alone.
+Kameo keeps a stable native directory for each profile, allowing the harness to refresh its own tokens and retain its profile-specific state. It does not copy refreshed tokens back into the original imported login. On macOS, Claude's directory-scoped Keychain entry is restored from the profile's file when the first session starts and snapshotted after each exit. Additional sessions share the live entry without restoring an older file over refreshed credentials. Deleting that profile also removes its scoped Keychain entry, leaving the default login alone.
 
 Existing supported file-based logins and Claude's macOS Keychain login can be imported automatically. For Codex logins stored only in an OS credential store, use **Sign in** to create an isolated login or import an exported native credential file. Antigravity imports accept its account token file; shared OS-keyring logins require a separate sign-in. Provider credential formats may evolve; the [integration notes](docs/ARCHITECTURE.md) record the contracts used here.
 
-One running Kameo invocation holds an exclusive lease on its profile. Another invocation of that same profile, editing, import, or deletion waits for you to close it first; Kameo reports that the profile is in use. Other profiles can run concurrently, and you can change the selection at any time. This avoids concurrent native token refresh and destructive edits during a session.
+You can launch multiple simultaneous sessions using the same profile and login, including in different project folders. Ordinary sessions share the profile’s native directory and credentials; native token refresh remains managed by the harness. Sign-in/setup, editing, import, and deletion require all sessions for that profile to be closed. You can change the selection at any time; existing sessions keep their original profile.
 
 Kameo removes inherited harness authentication overrides from the child environment. It rejects explicit arguments that replace the profile directory or credential storage mode. Project-local harness settings, administrator policies, and harness commands can still affect authentication: Kameo is a credential launcher, not an execution sandbox.
 
@@ -348,7 +348,7 @@ Startup entries point to this clone's build output. Re-register them if you move
 
 - **A harness cannot be found:** install it in the same Windows, macOS, Linux, or WSL environment as Kameo. Set its executable path in the profile if a desktop launch does not inherit your shell's `PATH`.
 - **The wrong account appears:** launch with `kameo claude`, `kameo codex`, `kameo antigravity`, or `kameo mux`. Running the original harness command directly does not use Kameo's selection. Existing sessions keep the identity they started with.
-- **A profile is in use:** close the agent session using that profile before editing, importing, deleting, or launching it again.
+- **A profile is in use:** close all sessions using that profile before signing in, editing, importing, or deleting it. Ordinary launches can share a profile. A session started by an older Kameo build still holds its old exclusive lock; close that session once before launching concurrent sessions with the updated build.
 - **There is no tray icon on Linux or WSL:** use the manager window; tray availability depends on the desktop environment.
 - **A native login has expired:** select the profile and use **Sign in**, or import its updated native credential file.
 

@@ -27,7 +27,9 @@ namespace Test.Harness
             foreach (string name in new[] { "KAMEO_PROFILE_ID", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "GEMINI_CLI_HOME", "MUX_CONFIG_DIR", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "KAMEO_MUX_API_KEY", "SSH_CONNECTION", "AGY_CLI_DISABLE_AUTO_UPDATE" })
                 environment[name] = Environment.GetEnvironmentVariable(name);
             JsonObject result = new JsonObject { ["arguments"] = arguments, ["environment"] = environment, ["cwd"] = Environment.CurrentDirectory };
-            await File.WriteAllTextAsync(args[capture + 1], result.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
+            string capturePath = args[capture + 1];
+            await File.WriteAllTextAsync(capturePath + ".tmp", result.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
+            File.Move(capturePath + ".tmp", capturePath);
             int token = Array.IndexOf(args, "--fixture-token");
             if (token >= 0)
             {
@@ -38,6 +40,12 @@ namespace Test.Harness
             }
             int sleep = Array.IndexOf(args, "--sleep");
             if (sleep >= 0) await Task.Delay(30000, CancellationToken.None).ConfigureAwait(false);
+            int wait = Array.IndexOf(args, "--wait-for-file");
+            if (wait >= 0)
+            {
+                using CancellationTokenSource timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                while (!File.Exists(args[wait + 1])) await Task.Delay(25, timeout.Token).ConfigureAwait(false);
+            }
             int exit = Array.IndexOf(args, "--exit");
             return exit >= 0 ? int.Parse(args[exit + 1], System.Globalization.CultureInfo.InvariantCulture) : 0;
         }

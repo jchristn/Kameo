@@ -6,6 +6,7 @@ namespace Kameo.Core
     using System.IO;
     using System.Linq;
     using System.Threading;
+    using System.Threading.Tasks;
     using Microsoft.Data.Sqlite;
 
     /// <summary>Transactional local profile storage. Independent connections make instances safe for concurrent callers.</summary>
@@ -194,18 +195,47 @@ namespace Kameo.Core
 
         /// <summary>Holds an exclusive profile lease. Callers must dispose it when their operation ends.</summary>
         /// <exception cref="InvalidOperationException">Another operation is using this profile.</exception>
-        public FileStream AcquireLease(string id)
+        public FileStream AcquireLease(string id) => AcquireProfileLease(id, FileShare.None);
+
+        /// <summary>Holds a shared running-session lease. Other sessions may join; edits and login require all sessions to exit.</summary>
+        /// <exception cref="InvalidOperationException">An exclusive operation is using this profile.</exception>
+        public FileStream AcquireSessionLease(string id) => AcquireProfileLease(id, FileShare.ReadWrite);
+
+        internal async Task<FileStream> AcquirePreparationLeaseAsync(string id, CancellationToken cancellationToken)
+        {
+            ValidateId(id);
+            string path = Path.Combine(Root, "locks", id + ".prepare.lock");
+            PrivateFiles.CheckPath(path);
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(30));
+            while (true)
+            {
+                timeout.Token.ThrowIfCancellationRequested();
+                try { return OpenLease(path, FileShare.None); }
+                catch (IOException)
+                {
+                    await Task.Delay(25, timeout.Token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private FileStream AcquireProfileLease(string id, FileShare share)
         {
             ValidateId(id);
             string path = Path.Combine(Root, "locks", id + ".lock");
             PrivateFiles.CheckPath(path);
             try
             {
-                FileStreamOptions options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None };
-                if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
-                return new FileStream(path, options);
+                return OpenLease(path, share);
             }
             catch (IOException) { throw new InvalidOperationException("This profile is in use. Close its running harness or login session and try again."); }
+        }
+
+        private static FileStream OpenLease(string path, FileShare share)
+        {
+            FileStreamOptions options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = share };
+            if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            return new FileStream(path, options);
         }
 
         /// <summary>Reads a non-secret desktop preference.</summary>

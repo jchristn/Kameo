@@ -8,6 +8,9 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 Alpha. Initial release.
 
+- Allow multiple simultaneous harness sessions using the same profile and login. Keep sign-in and destructive profile changes exclusive, and avoid restoring stale Claude credentials when another session is running.
+- When updating from an earlier 0.1.0 build, close existing harness sessions once to release their old exclusive locks. New sessions can then share the same profile.
+
 - Initial C# and Avalonia desktop, tray, and command-line applications.
 - API-key profiles for Claude Code, Codex, Antigravity, and Mux; native logins for Claude Code, Codex, and Antigravity; endpoint-file profiles for Mux.
 - Antigravity Google account profiles with isolated renewable token files, browser-code sign-in through the CLI, imports, concurrent accounts, and preserved legacy login data.

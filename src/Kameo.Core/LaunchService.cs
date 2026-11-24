@@ -90,16 +90,28 @@ namespace Kameo.Core
         public async Task<int> RunAsync(string id, IReadOnlyList<string> arguments, bool login, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using FileStream lease = _Store.AcquireLease(id);
+            using FileStream preparation = await _Store.AcquirePreparationLeaseAsync(id, cancellationToken).ConfigureAwait(false);
+            bool firstSession = true;
+            if (!login)
+            {
+                // The preparation lease serializes this idle check with other session starts and snapshots.
+                // Keep the existing lock path so older exclusive sessions still protect their credentials.
+                try { using FileStream idle = _Store.AcquireLease(id); }
+                catch (InvalidOperationException) { firstSession = false; }
+            }
+            using FileStream lease = login ? _Store.AcquireLease(id) : _Store.AcquireSessionLease(id);
             Profile profile = _Store.Get(id);
             LaunchPlan plan = Prepare(profile, arguments, login);
             ProcessStartInfo resolved = ExecutableResolver.Resolve(plan.StartInfo);
             if (profile.Harness == HarnessKind.Antigravity && profile.Kind == CredentialKind.Native)
                 await AntigravityCompatibility.VerifyAsync(resolved, _Store.ProfileDirectory(id), cancellationToken).ConfigureAwait(false);
-            if (profile.Harness == HarnessKind.Claude && profile.Kind == CredentialKind.Native && OperatingSystem.IsMacOS())
+            bool bridge = profile.Harness == HarnessKind.Claude && profile.Kind == CredentialKind.Native && OperatingSystem.IsMacOS();
+            if (bridge && firstSession)
                 await MacCredentialBridge.RestoreAsync(_Store.ProfileDirectory(id), cancellationToken).ConfigureAwait(false);
             using Process process = new Process { StartInfo = resolved };
+            cancellationToken.ThrowIfCancellationRequested();
             process.Start();
+            preparation.Dispose();
             try
             {
                 await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
@@ -112,8 +124,11 @@ namespace Kameo.Core
                     process.Kill(true);
                     await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
                 }
-                if (profile.Harness == HarnessKind.Claude && profile.Kind == CredentialKind.Native && OperatingSystem.IsMacOS())
-                    await MacCredentialBridge.SnapshotAsync(_Store.ProfileDirectory(id), cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                if (bridge)
+                {
+                    using FileStream snapshot = await _Store.AcquirePreparationLeaseAsync(id, CancellationToken.None).ConfigureAwait(false);
+                    await MacCredentialBridge.SnapshotAsync(_Store.ProfileDirectory(id), CancellationToken.None).ConfigureAwait(false);
+                }
                 if (profile.Harness == HarnessKind.Antigravity && profile.Kind == CredentialKind.Native)
                     AntigravityAuthentication.ProtectCredentialFile(_Store.ProfileDirectory(id));
             }
