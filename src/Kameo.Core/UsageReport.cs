@@ -26,6 +26,16 @@ namespace Kameo.Core
         public DateTimeOffset? ObservedUtc { get; init; }
         /// <summary>Limit windows in display order. Empty unless <see cref="Status"/> is <see cref="UsageStatus.Available"/>.</summary>
         public IReadOnlyList<UsageWindow> Windows { get; init; } = Array.Empty<UsageWindow>();
+        /// <summary>The highest percentage used across all windows: how close the login is to its tightest limit. Zero without windows.</summary>
+        public double PeakPercent
+        {
+            get
+            {
+                double peak = 0;
+                foreach (UsageWindow window in Windows) peak = Math.Max(peak, window.UsedPercent);
+                return peak;
+            }
+        }
 
         internal static UsageReport For(Profile profile, UsageStatus status, string message) => new UsageReport
         {

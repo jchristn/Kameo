@@ -199,6 +199,20 @@ namespace Test.Shared
                 IReadOnlyList<UsageReport> all = await service.ReadAllAsync(null, true, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(string.Join("|", all.Select(report => report.ProfileName)) == "A claude|A codex key|B codex", "All-harness usage should exclude unsupported harnesses.");
             });
+            AddSync("LeastUsedPicksLowestTightestLimit", fixture =>
+            {
+                UsageReport Make(string id, UsageStatus status, params double[] used) => new UsageReport
+                {
+                    ProfileId = id, Status = status, Windows = used.Select((value, index) => new UsageWindow("W" + index, value, null, null)).ToArray()
+                };
+                UsageReport busy = Make("busy", UsageStatus.Available, 5, 90);
+                UsageReport roomy = Make("roomy", UsageStatus.Available, 70, 20);
+                UsageReport tie = Make("tie", UsageStatus.Available, 70);
+                Fixture.Check(busy.PeakPercent == 90 && Make("none", UsageStatus.Available).PeakPercent == 0, "Peak should be the tightest window.");
+                Fixture.Check(UsageService.LeastUsed(new[] { busy, roomy, tie })?.ProfileId == "roomy", "The login with the lowest tightest limit should win, ties keep the first.");
+                Fixture.Check(UsageService.LeastUsed(new[] { Make("expired", UsageStatus.Expired), Make("empty", UsageStatus.Available), busy })?.ProfileId == "busy", "Unavailable or empty reports should be ignored.");
+                Fixture.Check(UsageService.LeastUsed(new[] { Make("expired", UsageStatus.Expired) }) == null && UsageService.LeastUsed(Array.Empty<UsageReport>()) == null, "No usable report should return null.");
+            });
             AddSync("FormattingIsStable", fixture =>
             {
                 Fixture.Check(UsageFormat.WindowLabel(300) == "5-hour" && UsageFormat.WindowLabel(10080) == "Weekly" && UsageFormat.WindowLabel(1440) == "Daily"

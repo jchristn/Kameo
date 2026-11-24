@@ -15,7 +15,7 @@ Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. I
 - Import existing native credential files without modifying the originals.
 - Independent selections for Claude Code, Codex, Antigravity, and Mux.
 - Shared Mux endpoints files: choose one JSON file for multiple profiles and pick up source changes at the next launch.
-- Plan usage for Claude Code and Codex native logins: **Check usage** shows each login's 5-hour, weekly, and model limits with reset times, and `kameo usage` prints the same in a terminal or as JSON.
+- Plan usage for Claude Code and Codex native logins: each login's 5-hour, weekly, and model limits with reset times, checked when you open the harness and reused for 15 minutes. **Launch lowest usage** starts the login with the most headroom, and `kameo usage` prints the same in a terminal or as JSON.
 - Tray launching, **Launch in...**, profile selection, and About, plus search, launch-folder selection, and a compact desktop manager.
 - 16 palettes with coordinated light and dark backgrounds, panels, and accents: Fern, Ocean, Iris, Amber, Rose, Graphite, Seafoam, Lagoon, Cobalt, Lavender, Coral, Sand, Espresso, Midnight, Paper, and Nord.
 - Native macOS application menus, including About, Edit, Profiles, View, Window, and Quit. Profiles submenus launch the selected account in your saved folder or a folder chosen for that session.
@@ -134,7 +134,7 @@ Remove any Kameo `PATH` entries, aliases, shortcuts, or symlinks you added manua
 
 1. Select a harness and click **Add profile**.
 2. Choose **API key** or **Native login / import**. For Antigravity, choose **Google account** or **API key**. For Mux, choose **API key** and enter the adapter, endpoint, and model, or choose **Endpoints file / setup** and browse to an existing endpoints JSON file.
-3. For native authentication, click **Sign in** to open the harness in a terminal, **Import current** to copy an existing login, or **Import...** to select a native credential JSON file. Mux's **Setup** opens its interactive TUI and first-run wizard; an existing Mux profile can use its F1 setup command.
+3. For native authentication, click **Sign in** to open the harness in a terminal, or **Import** to copy this computer's current login or select a native credential JSON file. The gear icon edits a profile and the trash icon deletes it. Mux's **Setup** opens its interactive TUI and first-run wizard; an existing Mux profile can use its F1 setup command.
 4. Click **Launch** on a profile's card to start it in the saved launch folder, or **Launch in...** to choose a folder for this session only. Every profile has its own buttons, so you can launch any account without changing the selection.
 5. Click **Use profile** or choose the profile from the tray to make it the selected profile, which `kameo claude`, `kameo codex`, and the other terminal commands use. The first profile for a harness is selected automatically. Each harness submenu in the tray also has **Launch** and **Launch in...** for the selected profile. Canceling the folder picker starts nothing; choosing a folder with **Launch in...** does not change the saved launch folder in the sidebar.
 
@@ -261,7 +261,7 @@ The desktop provides the same fields. Mux's current source has no separate subsc
 
 ### Check plan usage
 
-Each Claude Code or Codex native login has its own subscription limits. In the desktop, open Claude Code or Codex and click **Check usage** (or **View > Check Usage**). Each login's card shows its windows, such as 5-hour and weekly, with a bar, the percentage used, and when the window resets. In a terminal:
+Each Claude Code or Codex native login has its own subscription limits. In the desktop, open Claude Code or Codex: Kameo checks each native login and shows its windows, such as 5-hour and weekly, with a bar, the percentage used, and when the window resets. Results are reused for 15 minutes, so switching between harnesses does not check again; **Refresh usage** (or **View > Refresh Usage**, ⌘U on macOS) checks now. **Launch lowest usage** opens the login whose tightest limit has the lowest percentage used, refreshing stale results first, in your launch folder. In a terminal:
 
 ```sh
 kameo usage                 # every Claude Code and Codex login
@@ -294,7 +294,7 @@ kameo select PROFILE_ID
 kameo antigravity
 ```
 
-Replace `PROFILE_ID` with the ID printed by `add`. Sign-in and refresh are handled by Antigravity itself. Kameo does not exchange authorization codes or export logins from the shared OS keyring. **Import** accepts an existing Antigravity account token file; **Import current login** works only when the default CLI already has a file-backed login. Otherwise, use **Sign in**.
+Replace `PROFILE_ID` with the ID printed by `add`. Sign-in and refresh are handled by Antigravity itself. Kameo does not exchange authorization codes or export logins from the shared OS keyring. **Import > Credential file...** accepts an existing Antigravity account token file; **Import > Current Antigravity login** works only when the default CLI already has a file-backed login. Otherwise, use **Sign in**.
 
 API keys remain available: create an **Antigravity → API key** profile with a key from [Google AI Studio](https://aistudio.google.com/apikey). Kameo configures API-key authentication and passes the selected key to the child process. The account-specific version check does not apply to API-key profiles.
 
@@ -308,7 +308,7 @@ Existing profiles, keys, selections, and legacy login files are retained. An old
 
 Kameo stores the source path and reads it again before each launch, placing a fresh copy in that profile's isolated Mux directory. Edits to the shared file apply to future launches. Running sessions keep their existing configuration. Kameo never edits or deletes the source, including when you delete a profile. Missing or invalid source files stop the launch rather than silently using an old copy. Environment references in shared endpoints are resolved from Kameo's environment at launch time; the referenced variables must be available there.
 
-To stop sharing, clear **Shared endpoints file** and save; the most recent local copy remains available for this profile's Setup or import actions. For an independent copy from the outset, leave the shared file field blank and use **Import...** after saving. API-key profiles use their own key/endpoint fields; create an endpoints-file profile to use a file's existing credentials.
+To stop sharing, clear **Shared endpoints file** and save; the most recent local copy remains available for this profile's Setup or import actions. For an independent copy from the outset, leave the shared file field blank and use **Import > Credential file...** after saving. API-key profiles use their own key/endpoint fields; create an endpoints-file profile to use a file's existing credentials.
 
 The CLI supports the same link:
 

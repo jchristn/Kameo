@@ -40,6 +40,22 @@ namespace Kameo.Core
             return HarnessCatalog.SupportsUsage(profile.Harness) && profile.Kind == CredentialKind.Native;
         }
 
+        /// <summary>
+        /// Chooses the login with the most headroom: the available report whose tightest limit (<see cref="UsageReport.PeakPercent"/>)
+        /// is lowest. Ties go to the earlier report. Returns null when no report has usage windows.
+        /// </summary>
+        public static UsageReport? LeastUsed(IEnumerable<UsageReport> reports)
+        {
+            ArgumentNullException.ThrowIfNull(reports);
+            UsageReport? best = null;
+            foreach (UsageReport report in reports)
+            {
+                if (report.Status != UsageStatus.Available || report.Windows.Count == 0) continue;
+                if (best == null || report.PeakPercent < best.PeakPercent) best = report;
+            }
+            return best;
+        }
+
         /// <summary>Checks one profile. Failures are returned as reports with a display-safe message rather than thrown.</summary>
         /// <param name="id">Profile identifier.</param>
         /// <param name="offline">True to use only local data: Codex session logs. No network or child process is used.</param>

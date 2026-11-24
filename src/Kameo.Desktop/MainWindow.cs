@@ -25,8 +25,13 @@ namespace Kameo.Desktop
         private readonly Func<CancellationToken, Task<string?>> _PickFolder;
         private readonly Action<string, bool, string> _OpenTerminal;
         private readonly Func<string, CancellationToken, Task<UsageReport>> _ReadUsage;
+        private readonly TimeProvider _Clock;
         private readonly Dictionary<string, UsageReport> _Usage = new Dictionary<string, UsageReport>();
-        private readonly HashSet<string> _CheckingUsage = new HashSet<string>();
+        private readonly Dictionary<string, DateTimeOffset> _UsageCheckedAt = new Dictionary<string, DateTimeOffset>();
+        private readonly Dictionary<string, Task> _PendingUsage = new Dictionary<string, Task>();
+
+        /// <summary>How long a usage result is reused before navigation checks that login again.</summary>
+        internal static readonly TimeSpan UsageCacheDuration = TimeSpan.FromMinutes(15);
         private HarnessKind _Harness = HarnessKind.Claude;
         private TextBox? _Search;
         private StackPanel? _Profiles;
@@ -42,7 +47,7 @@ namespace Kameo.Desktop
 
         internal MainWindow(ProfileStore store, Action changed, Action quit,
             Func<CancellationToken, Task<string?>>? pickFolder, Action<string, bool, string>? openTerminal,
-            Func<string, CancellationToken, Task<UsageReport>>? readUsage = null)
+            Func<string, CancellationToken, Task<UsageReport>>? readUsage = null, TimeProvider? clock = null)
         {
             _Store = store;
             _Changed = changed;
@@ -50,12 +55,14 @@ namespace Kameo.Desktop
             _PickFolder = pickFolder ?? PickFolderAsync;
             _OpenTerminal = openTerminal ?? ((id, login, directory) => TerminalLauncher.Open(_Store, id, login, directory));
             _ReadUsage = readUsage ?? ((id, cancellationToken) => new UsageService(_Store).ReadAsync(id, false, cancellationToken));
+            _Clock = clock ?? TimeProvider.System;
             _Workspace = store.Preference("workspace") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (!Directory.Exists(_Workspace)) _Workspace = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             Title = "Kameo";
             Width = 800; Height = 550; MinWidth = 700; MinHeight = 440;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             Closed += (_, _) => _Logo?.Dispose();
+            Opened += (_, _) => _ = CheckUsageAsync(false, CancellationToken.None);
             InstallNativeMenus();
             Refresh();
         }
@@ -93,7 +100,7 @@ namespace Kameo.Desktop
             bar.Add(new NativeMenuItem("Profiles") { Menu = harnesses });
             bar.Add(NativeMenus.Submenu("View",
                 NativeMenus.Item("Refresh Profiles", Refresh, Avalonia.Input.Key.R),
-                NativeMenus.Item("Check Usage", () => _ = CheckUsageAsync(CancellationToken.None), Avalonia.Input.Key.U),
+                NativeMenus.Item("Refresh Usage", () => _ = CheckUsageAsync(true, CancellationToken.None), Avalonia.Input.Key.U),
                 NativeMenus.Item("Appearance...", ShowAppearance),
                 NativeMenus.Item("Light Appearance", () => SetAppearance(false)),
                 NativeMenus.Item("Dark Appearance", () => SetAppearance(true))));
@@ -118,7 +125,7 @@ namespace Kameo.Desktop
                 NativeMenuItem launchIn = NativeMenus.Item("Launch in...", () => LaunchSelectedIn(harness));
                 launchIn.IsEnabled = active != null;
                 choices.Add(launch); choices.Add(launchIn); choices.Add(new NativeMenuItemSeparator());
-                choices.Add(NativeMenus.Item("Manage profiles...", () => { _Harness = harness; if (_Search != null) _Search.Text = ""; Refresh(); }));
+                choices.Add(NativeMenus.Item("Manage profiles...", () => ShowHarness(harness)));
             }
         }
 
@@ -134,8 +141,28 @@ namespace Kameo.Desktop
         /// <summary>Refreshes the view when another process changes profile state.</summary>
         public void RefreshIfChanged()
         {
-            string fingerprint = Fingerprint(_Store.List());
-            if (fingerprint != _Fingerprint) Refresh();
+            IReadOnlyList<Profile> profiles = _Store.List();
+            string fingerprint = Fingerprint(profiles);
+            if (fingerprint == _Fingerprint) return;
+            // A sign-in finished elsewhere: forget cached "signed out" results so the new login is checked.
+            foreach (Profile profile in profiles)
+                if (profile.HasNativeCredential && _Usage.TryGetValue(profile.Id, out UsageReport? cached) && cached.Status == UsageStatus.SignedOut) ForgetUsage(profile.Id);
+            Refresh();
+            _ = CheckUsageAsync(false, CancellationToken.None);
+        }
+
+        private void ShowHarness(HarnessKind harness)
+        {
+            _Harness = harness;
+            if (_Search != null) _Search.Text = "";
+            Refresh();
+            _ = CheckUsageAsync(false, CancellationToken.None);
+        }
+
+        private void ForgetUsage(string id)
+        {
+            _Usage.Remove(id);
+            _UsageCheckedAt.Remove(id);
         }
 
         /// <summary>Rebuilds the current view while preserving its search filter.</summary>
@@ -159,12 +186,24 @@ namespace Kameo.Desktop
             Button add = Ui.Button("+  Add profile", () => _ = EditAsync(null, CancellationToken.None), true);
             StackPanel headingActions = Ui.Row(add);
             headingActions.VerticalAlignment = VerticalAlignment.Center;
-            if (HarnessCatalog.SupportsUsage(_Harness) && all.Any(profile => profile.Harness == _Harness && UsageService.Supports(profile)))
+            List<Profile> natives = all.Where(profile => profile.Harness == _Harness && UsageService.Supports(profile)).ToList();
+            if (HarnessCatalog.SupportsUsage(_Harness) && natives.Count > 0)
             {
-                Button usage = Ui.Button("Check usage", () => _ = CheckUsageAsync(CancellationToken.None));
-                usage.IsEnabled = !all.Any(profile => _CheckingUsage.Contains(profile.Id) && profile.Harness == _Harness);
-                ToolTip.SetTip(usage, "Check plan limits for this harness's native logins. Uses each saved login without changing it.");
+                bool checking = natives.Any(profile => _PendingUsage.ContainsKey(profile.Id));
+                Button usage = Ui.Button("Refresh usage", () => _ = CheckUsageAsync(true, CancellationToken.None));
+                usage.IsEnabled = !checking;
+                ToolTip.SetTip(usage, "Check plan limits now. Results are otherwise reused for 15 minutes. Uses each saved login without changing it.");
                 headingActions.Children.Insert(0, usage);
+                if (natives.Count > 1)
+                {
+                    Button lowest = Ui.Button("Launch lowest usage", () => _ = LaunchLowestAsync(CancellationToken.None));
+                    UsageReport? least = UsageService.LeastUsed(natives.Where(profile => _Usage.ContainsKey(profile.Id)).Select(profile => _Usage[profile.Id]));
+                    Profile? leastProfile = least == null ? null : natives.FirstOrDefault(profile => profile.Id == least.ProfileId);
+                    ToolTip.SetTip(lowest, leastProfile == null
+                        ? "Launch the login with the most remaining plan usage in your launch folder."
+                        : "Launch " + leastProfile.Name + " (" + UsageFormat.Percent(least!.PeakPercent) + " used at its tightest limit) in your launch folder.");
+                    headingActions.Children.Insert(1, lowest);
+                }
             }
             Grid.SetColumn(headingActions, 1); heading.Children.Add(headingActions);
 
@@ -215,7 +254,7 @@ namespace Kameo.Desktop
                     Background = harness == _Harness ? Palette.AccentSoft : Brushes.Transparent,
                     BorderBrush = harness == _Harness ? Palette.Border : Brushes.Transparent
                 };
-                button.Click += (_, _) => { _Harness = harness; if (_Search != null) _Search.Text = ""; Refresh(); };
+                button.Click += (_, _) => ShowHarness(harness);
                 navigation.Children.Add(button);
             }
             navigation.Children.Add(new Border { Height = 1, Background = Palette.Border, Margin = new Thickness(0, 12) });
@@ -262,31 +301,31 @@ namespace Kameo.Desktop
                 ToolTip.SetTip(launch, "Open a terminal in " + _Workspace + " with this profile.");
                 Button launchIn = Ui.Button("Launch in...", () => _ = ChooseDirectoryAsync(profile.Id, CancellationToken.None));
                 ToolTip.SetTip(launchIn, "Choose a folder for this launch without changing your saved launch folder.");
-                StackPanel actions = Ui.Row(launch, launchIn,
-                    Ui.Button(profile.IsActive ? "Selected" : "Use profile", () => RunAction(() => { _Store.Select(profile.Id); Refresh(); _Changed(); })),
-                    Ui.Button("Edit", () => _ = EditAsync(profile.Id, CancellationToken.None)));
-                actions.Children[2].IsEnabled = !profile.IsActive;
-                ToolTip.SetTip(actions.Children[2], "Make this the profile that kameo " + HarnessCatalog.Command(profile.Harness) + " and the tray launch.");
+                Button use = Ui.Button(profile.IsActive ? "Selected" : "Use profile", () => RunAction(() => { _Store.Select(profile.Id); Refresh(); _Changed(); }));
+                use.IsEnabled = !profile.IsActive;
+                ToolTip.SetTip(use, "Make this the profile that kameo " + HarnessCatalog.Command(profile.Harness) + " and the tray launch.");
+                WrapPanel primary = new WrapPanel { ItemSpacing = 8, LineSpacing = 8 };
+                primary.Children.Add(launch); primary.Children.Add(launchIn); primary.Children.Add(use);
                 if (profile.Kind == CredentialKind.Native && profile.MuxEndpointsFile.Length == 0 && HarnessCatalog.SupportsNativeLogin(profile.Harness))
                 {
-                    actions.Children.Add(Ui.Button(profile.Harness == HarnessKind.Mux ? "Setup" : "Sign in", () => RunAction(() => _OpenTerminal(profile.Id, true, _Workspace))));
-                    actions.Children.Add(Ui.Button("Import...", () => _ = ImportAsync(profile.Id, CancellationToken.None)));
-                    actions.Children.Add(Ui.Button("Import current", () => _ = ImportCurrentAsync(profile.Id, CancellationToken.None)));
+                    primary.Children.Add(Ui.Button(profile.Harness == HarnessKind.Mux ? "Setup" : "Sign in", () => RunAction(() => _OpenTerminal(profile.Id, true, _Workspace))));
+                    primary.Children.Add(ImportButton(profile));
                 }
-                Button delete = Ui.Button("Delete", () => _ = DeleteAsync(profile, CancellationToken.None));
-                delete.Foreground = Palette.Danger;
-                actions.Children.Add(delete);
-                WrapPanel wrappedActions = new WrapPanel { ItemSpacing = 8, LineSpacing = 8 };
-                Control[] buttons = actions.Children.ToArray();
-                actions.Children.Clear();
-                foreach (Control button in buttons) wrappedActions.Children.Add(button);
+                StackPanel manage = Ui.Row(
+                    Ui.IconButton("Edit", "Edit profile", Ui.GearIcon, () => _ = EditAsync(profile.Id, CancellationToken.None)),
+                    Ui.IconButton("Delete", "Delete profile", Ui.TrashIcon, () => _ = DeleteAsync(profile, CancellationToken.None), Palette.Danger));
+                manage.VerticalAlignment = VerticalAlignment.Top;
+                manage.Margin = new Thickness(8, 0, 0, 0);
+                Grid actions = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+                actions.Children.Add(primary);
+                Grid.SetColumn(manage, 1); actions.Children.Add(manage);
                 StackPanel card = Ui.Stack(heading, Ui.Text(description, 12, Palette.Muted));
                 if (UsageService.Supports(profile))
                 {
-                    if (_CheckingUsage.Contains(profile.Id)) card.Children.Add(Ui.Text("Checking usage...", 12, Palette.Muted));
-                    else if (_Usage.TryGetValue(profile.Id, out UsageReport? report)) card.Children.Add(BuildUsage(report));
+                    if (_Usage.TryGetValue(profile.Id, out UsageReport? report)) card.Children.Add(BuildUsage(report));
+                    else if (_PendingUsage.ContainsKey(profile.Id)) card.Children.Add(Ui.Text("Checking usage...", 12, Palette.Muted));
                 }
-                card.Children.Add(wrappedActions);
+                card.Children.Add(actions);
                 _Profiles.Children.Add(Ui.Card(card));
             }
         }
@@ -329,44 +368,108 @@ namespace Kameo.Desktop
             };
         }
 
-        /// <summary>Checks plan usage for every native login of the current harness and shows the results on their cards.</summary>
-        internal async Task CheckUsageAsync(CancellationToken cancellationToken)
+        private Control ImportButton(Profile profile)
+        {
+            MenuItem current = new MenuItem { Header = "Current " + HarnessCatalog.Name(profile.Harness) + " login" };
+            current.Click += (_, _) => _ = ImportCurrentAsync(profile.Id, CancellationToken.None);
+            MenuItem file = new MenuItem { Header = "Credential file..." };
+            file.Click += (_, _) => _ = ImportAsync(profile.Id, CancellationToken.None);
+            MenuFlyout menu = new MenuFlyout();
+            menu.Items.Add(current);
+            menu.Items.Add(file);
+            DropDownButton import = new DropDownButton { Content = "Import", Flyout = menu, Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand) };
+            ToolTip.SetTip(import, "Copy an existing login into this profile, from this computer's current login or a native credential file.");
+            return import;
+        }
+
+        /// <summary>
+        /// Checks plan usage for the current harness's native logins and shows the results on their cards. Unless
+        /// <paramref name="force"/> is set, a login checked within <see cref="UsageCacheDuration"/> is not checked again.
+        /// </summary>
+        internal async Task CheckUsageAsync(bool force, CancellationToken cancellationToken)
         {
             HarnessKind harness = _Harness;
-            if (!HarnessCatalog.SupportsUsage(harness)) { Report("Plan usage is available for Claude Code and Codex native logins."); return; }
-            List<Profile> profiles;
-            try { profiles = _Store.List().Where(profile => profile.Harness == harness && UsageService.Supports(profile) && !_CheckingUsage.Contains(profile.Id)).ToList(); }
-            catch (Microsoft.Data.Sqlite.SqliteException) { Report("The profile database is busy or unavailable. Try again."); return; }
-            if (profiles.Count == 0)
+            if (!HarnessCatalog.SupportsUsage(harness))
             {
-                if (!_CheckingUsage.Any()) Report("Add a native login to see plan usage. API keys have no plan limits.");
+                if (force) Report("Plan usage is available for Claude Code and Codex native logins.");
                 return;
             }
-            foreach (Profile profile in profiles) _CheckingUsage.Add(profile.Id);
-            Refresh();
-            if (_Status != null) { _Status.Text = "Checking " + HarnessCatalog.Name(harness) + " usage..."; _Status.Foreground = Palette.Muted; }
+            List<Profile> natives;
+            try { natives = _Store.List().Where(profile => profile.Harness == harness && UsageService.Supports(profile)).ToList(); }
+            catch (Microsoft.Data.Sqlite.SqliteException) { if (force) Report("The profile database is busy or unavailable. Try again."); return; }
+            DateTimeOffset now = _Clock.GetUtcNow();
+            List<Profile> due = natives.Where(profile => !_PendingUsage.ContainsKey(profile.Id)
+                && (force || !_UsageCheckedAt.TryGetValue(profile.Id, out DateTimeOffset checkedAt) || now - checkedAt >= UsageCacheDuration)).ToList();
+            if (due.Count == 0)
+            {
+                if (force && natives.Count == 0) Report("Add a native login to see plan usage. API keys have no plan limits.");
+                return;
+            }
             using SemaphoreSlim gate = new SemaphoreSlim(4);
-            async Task CheckAsync(Profile profile)
+            List<Task> checks = new List<Task>();
+            foreach (Profile profile in due)
+            {
+                _PendingUsage[profile.Id] = Task.CompletedTask;
+                Task check = ReadUsageAsync(profile, gate, cancellationToken);
+                if (!check.IsCompleted) _PendingUsage[profile.Id] = check;
+                checks.Add(check);
+            }
+            if (_Harness == harness && due.Any(profile => _PendingUsage.ContainsKey(profile.Id)))
+            {
+                Refresh();
+                if (_Status != null) { _Status.Text = "Checking " + HarnessCatalog.Name(harness) + " usage..."; _Status.Foreground = Palette.Muted; }
+            }
+            try { await Task.WhenAll(checks); }
+            finally
+            {
+                Refresh();
+                if (_Status != null && _Harness == harness) { _Status.Text = HarnessCatalog.Name(harness) + " usage checked."; _Status.Foreground = Palette.Accent; }
+            }
+        }
+
+        private async Task ReadUsageAsync(Profile profile, SemaphoreSlim gate, CancellationToken cancellationToken)
+        {
+            try
             {
                 await gate.WaitAsync(cancellationToken);
                 UsageReport report;
                 try { report = await _ReadUsage(profile.Id, cancellationToken); }
-                catch (OperationCanceledException) { _CheckingUsage.Remove(profile.Id); return; }
                 catch (Exception error) when (error is IOException or InvalidOperationException or KeyNotFoundException or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
                 {
                     report = new UsageReport { ProfileId = profile.Id, ProfileName = profile.Name, Harness = profile.Harness, Status = UsageStatus.Unavailable, Message = "Unable to read usage for this profile." };
                 }
                 finally { gate.Release(); }
                 _Usage[profile.Id] = report;
-                _CheckingUsage.Remove(profile.Id);
-                RenderProfiles();
+                _UsageCheckedAt[profile.Id] = _Clock.GetUtcNow();
             }
-            try { await Task.WhenAll(profiles.Select(CheckAsync)); }
+            catch (OperationCanceledException) { }
             finally
             {
-                foreach (Profile profile in profiles) _CheckingUsage.Remove(profile.Id);
-                Refresh();
-                if (_Status != null) { _Status.Text = HarnessCatalog.Name(harness) + " usage checked."; _Status.Foreground = Palette.Accent; }
+                _PendingUsage.Remove(profile.Id);
+                RenderProfiles();
+            }
+        }
+
+        /// <summary>Launches the current harness's native login with the lowest usage at its tightest limit, checking stale usage first.</summary>
+        internal async Task LaunchLowestAsync(CancellationToken cancellationToken)
+        {
+            HarnessKind harness = _Harness;
+            await CheckUsageAsync(false, cancellationToken);
+            await Task.WhenAll(_PendingUsage.Values.ToArray());
+            List<Profile> natives;
+            try { natives = _Store.List().Where(profile => profile.Harness == harness && UsageService.Supports(profile)).ToList(); }
+            catch (Microsoft.Data.Sqlite.SqliteException) { Report("The profile database is busy or unavailable. Try again."); return; }
+            UsageReport? least = UsageService.LeastUsed(natives.Where(profile => _Usage.ContainsKey(profile.Id)).Select(profile => _Usage[profile.Id]));
+            Profile? target = least == null ? null : natives.FirstOrDefault(profile => profile.Id == least.ProfileId);
+            if (least == null || target == null)
+            {
+                Report("No plan usage is available for these logins yet. Make sure they are signed in, then refresh usage.");
+                return;
+            }
+            if (RunAction(() => _OpenTerminal(target.Id, false, _Workspace)) && _Status != null)
+            {
+                _Status.Text = "Launched " + target.Name + ": " + UsageFormat.Percent(least.PeakPercent) + " used at its tightest limit.";
+                _Status.Foreground = Palette.Accent;
             }
         }
 
@@ -376,7 +479,7 @@ namespace Kameo.Desktop
             try
             {
                 ProfileEditor editor = new ProfileEditor(_Store, _Harness, id);
-                if (await editor.ShowDialog<bool>(this)) { Refresh(); _Changed(); }
+                if (await editor.ShowDialog<bool>(this)) { Refresh(); _Changed(); _ = CheckUsageAsync(false, CancellationToken.None); }
             }
             catch (System.Text.Json.JsonException) { Report("The profile configuration is not valid JSON. Re-import the native configuration."); }
             catch (Exception error) when (error is InvalidOperationException or IOException or InvalidDataException or ArgumentException or KeyNotFoundException) { Report(error.Message); }
@@ -394,7 +497,7 @@ namespace Kameo.Desktop
                 RunAction(() =>
                 {
                     string path = files[0].TryGetLocalPath() ?? throw new InvalidOperationException("Choose a local credential file.");
-                    new CredentialFiles(_Store).Import(id, path); Refresh(); _Changed();
+                    new CredentialFiles(_Store).Import(id, path); ForgetUsage(id); Refresh(); _Changed(); _ = CheckUsageAsync(false, CancellationToken.None);
                 });
             }
             finally { foreach (IStorageFile file in files) file.Dispose(); }
@@ -402,7 +505,7 @@ namespace Kameo.Desktop
 
         private async Task ImportCurrentAsync(string id, CancellationToken cancellationToken)
         {
-            try { await new CurrentLoginImporter(_Store).ImportAsync(id, cancellationToken); Refresh(); _Changed(); }
+            try { await new CurrentLoginImporter(_Store).ImportAsync(id, cancellationToken); ForgetUsage(id); Refresh(); _Changed(); _ = CheckUsageAsync(false, CancellationToken.None); }
             catch (Exception error) when (error is IOException or InvalidDataException or InvalidOperationException or ArgumentException or OperationCanceledException) { Report(error.Message); }
         }
 

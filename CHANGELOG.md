@@ -4,14 +4,15 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 ## [Unreleased]
 
-- Each profile card has its own **Launch** and **Launch in...** buttons, so any account can be launched without changing the selection. The separate launch card showing the `kameo claude`/`kameo codex` command is removed; **Use profile** still sets the profile used by terminal commands and the tray.
-
-- Plan usage for Claude Code and Codex native logins. **Check usage** in the desktop (also **View > Check Usage**) shows each login's 5-hour, weekly, and per-model windows with bars, percentages, and reset times. `kameo usage [claude|codex|ID] [--offline] [--json]` prints the same.
-- Claude Code usage is read with the profile's saved sign-in and is never refreshed by Kameo. Codex usage comes from the profile's isolated `codex app-server`, falling back to limits recorded in the profile's last session. API-key profiles report no plan limits.
-
 ## [0.1.0] - 2026-11-20
 
 Alpha. Initial release.
+
+- Plan usage for Claude Code and Codex native logins. Opening Claude Code or Codex in the desktop checks each login's 5-hour, weekly, and per-model limits and shows them as bars with the percentage used and reset times. Results are reused for 15 minutes; **Refresh usage** (or **View > Refresh Usage**) checks again now. `kameo usage [claude|codex|ID] [--offline] [--json]` prints the same in a terminal.
+- **Launch lowest usage** starts the login with the most headroom: the one whose tightest limit has the lowest percentage used.
+- Claude Code usage is read with the profile's saved sign-in and is never refreshed by Kameo. Codex usage comes from the profile's isolated `codex app-server`, falling back to limits recorded in the profile's last session. API-key profiles report no plan limits.
+- Each profile card has its own **Launch** and **Launch in...** buttons, so any account can be launched without changing the selection. The separate launch card showing the `kameo claude`/`kameo codex` command is removed; **Use profile** still sets the profile used by terminal commands and the tray.
+- **Import** is one menu with the current login and a credential file. Edit and delete are gear and trash icons at the right of each card.
 
 - Allow multiple simultaneous harness sessions using the same profile and login. Keep sign-in and destructive profile changes exclusive, and avoid restoring stale Claude credentials when another session is running.
 - When updating from an earlier 0.1.0 build, close existing harness sessions once to release their old exclusive locks. New sessions can then share the same profile.
