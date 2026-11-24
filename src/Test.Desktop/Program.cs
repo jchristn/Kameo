@@ -152,6 +152,48 @@ namespace Test.Desktop
                 }
                 finally { window.Close(); }
             });
+            Add("TrayMenuShowsAboutAndLaunchesTheCurrentSelection", (_, store) =>
+            {
+                store.SetPreference("workspace", store.Root);
+                List<string> launches = new List<string>();
+                List<string> folders = new List<string>();
+                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root),
+                    (id, login, directory) => { Check(!login, "Tray launch used login mode."); launches.Add(id); folders.Add(directory); });
+                int shown = 0; int quits = 0;
+                try
+                {
+                    TrayMenu tray = new TrayMenu(store, window, () => { shown++; window.Show(); }, () => quits++);
+                    tray.Refresh();
+                    NativeMenu menu = tray.Menu;
+                    NativeMenuItem Top(string header) => menu.Items.OfType<NativeMenuItem>().Single(item => item.Header == header);
+                    Check(menu.Items.OfType<NativeMenuItem>().First().Header == "About Kameo", "Tray About is not the first item.");
+                    Click(Top("About Kameo")); Dispatcher.UIThread.RunJobs();
+                    AboutWindow about = window.OwnedWindows.OfType<AboutWindow>().Single();
+                    Check(about.IsVisible && shown == 1, "Tray About did not show the About box over the manager."); about.Close();
+                    foreach (HarnessKind harness in HarnessCatalog.All)
+                    {
+                        NativeMenu choices = Top(HarnessCatalog.Name(harness)).Menu!;
+                        Check(!((NativeMenuItem)choices.Items[0]).IsEnabled && !((NativeMenuItem)choices.Items[1]).IsEnabled, "An empty harness can launch from the tray.");
+                        Profile first = store.Create(new Profile { Harness = harness, Name = "First", Kind = CredentialKind.Native });
+                        Profile second = store.Create(new Profile { Harness = harness, Name = "Second", Kind = CredentialKind.ApiKey, ApiKey = "synthetic" });
+                        tray.Refresh(); Check(ReferenceEquals(menu, tray.Menu), "Tray menu was replaced.");
+                        choices = Top(HarnessCatalog.Name(harness)).Menu!;
+                        NativeMenuItem launch = (NativeMenuItem)choices.Items[0];
+                        Check(launch.IsEnabled && launch.Header == "Launch First", "Tray launch is unavailable for the selected profile.");
+                        int shownBefore = shown;
+                        Click(launch); Check(launches.Last() == first.Id && folders.Last() == store.Root && shown == shownBefore, "Tray launch used the wrong profile or folder, or opened the manager.");
+                        NativeMenuItem pickSecond = choices.Items.OfType<NativeMenuItem>().Single(item => item.Header == "Second");
+                        Click(pickSecond); Check(store.Selected(harness).Id == second.Id, "Tray selection did not change the profile.");
+                        choices = Top(HarnessCatalog.Name(harness)).Menu!;
+                        Check(((NativeMenuItem)choices.Items[0]).Header == "Launch Second", "Tray launch label did not follow the selection.");
+                        Click((NativeMenuItem)choices.Items[1]); Check(launches.Last() == second.Id && shown > shownBefore, "Tray Launch in did not use the manager's folder picker.");
+                        store.Delete(second.Id); store.Delete(first.Id); tray.Refresh();
+                        Check(!((NativeMenuItem)Top(HarnessCatalog.Name(harness)).Menu!.Items[0]).IsEnabled, "Deleted profiles remain launchable from the tray.");
+                    }
+                    Click(Top("Quit Kameo")); Check(quits == 1, "Tray Quit did not quit.");
+                }
+                finally { window.Close(); }
+            });
             Add("AboutUsesPaletteLogoAndRepositoryLink", (window, store) =>
             {
                 bool originalDark = Palette.Dark; string originalScheme = Palette.Scheme.Id;
@@ -169,7 +211,11 @@ namespace Test.Desktop
                         TextBlock copyright = about.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Text == "Copyright (c) 2026 Joel Christner");
                         TextBlock license = about.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Text == "MIT License");
                         Check(license.TranslatePoint(default, about)!.Value.Y - copyright.TranslatePoint(default, about)!.Value.Y - copyright.Bounds.Height >= 16, "Copyright and license need more space.");
-                        Click(Button(about, "Close")); Check(!about.IsVisible, "About did not close.");
+                        Button close = Button(about, "Close");
+                        TextBlock closeLabel = close.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Text == "Close");
+                        double labelCenter = closeLabel.TranslatePoint(default, close)!.Value.X + (closeLabel.Bounds.Width / 2);
+                        Check(close.HorizontalContentAlignment == Avalonia.Layout.HorizontalAlignment.Center && Math.Abs(labelCenter - (close.Bounds.Width / 2)) <= 1, "The Close label is not centered in its button.");
+                        Click(close); Check(!about.IsVisible, "About did not close.");
                     }
                 }
                 finally { Palette.Apply(Application.Current!, originalDark, originalScheme); }

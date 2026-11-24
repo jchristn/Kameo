@@ -62,6 +62,15 @@ namespace Kameo.Desktop
             _ = new AboutWindow().ShowDialog(this);
         }
 
+        /// <summary>Opens a terminal for a harness's selected profile in the saved launch folder.</summary>
+        /// <param name="harness">The harness whose selected profile is launched.</param>
+        /// <returns>True when the terminal opened; false when a failure was reported in this window.</returns>
+        internal bool LaunchSelected(HarnessKind harness) => RunAction(() => _OpenTerminal(_Store.Selected(harness).Id, false, _Workspace));
+
+        /// <summary>Asks for a folder, then opens a terminal there for a harness's selected profile.</summary>
+        /// <param name="harness">The harness whose selected profile is launched.</param>
+        internal void LaunchSelectedIn(HarnessKind harness) => RunAction(() => { _ = ChooseDirectoryAsync(_Store.Selected(harness).Id, CancellationToken.None); });
+
         private void InstallNativeMenus()
         {
             NativeMenu bar = new NativeMenu();
@@ -99,10 +108,9 @@ namespace Kameo.Desktop
                 choices.Items.Clear();
                 Profile? active = profiles.FirstOrDefault(profile => profile.Harness == harness && profile.IsActive);
                 NativeMenuItem launch = NativeMenus.Item(active == null ? "No profile selected" : "Launch " + active.Name,
-                    () => RunAction(() => _OpenTerminal(_Store.Selected(harness).Id, false, _Workspace)));
+                    () => _ = LaunchSelected(harness));
                 launch.IsEnabled = active != null;
-                NativeMenuItem launchIn = NativeMenus.Item("Launch in...",
-                    () => RunAction(() => { _ = ChooseDirectoryAsync(_Store.Selected(harness).Id, CancellationToken.None); }));
+                NativeMenuItem launchIn = NativeMenus.Item("Launch in...", () => LaunchSelectedIn(harness));
                 launchIn.IsEnabled = active != null;
                 choices.Add(launch); choices.Add(launchIn); choices.Add(new NativeMenuItemSeparator());
                 choices.Add(NativeMenus.Item("Manage profiles...", () => { _Harness = harness; if (_Search != null) _Search.Text = ""; Refresh(); }));
@@ -361,11 +369,12 @@ namespace Kameo.Desktop
             if (_Status != null) { _Status.Text = "Launch command copied."; _Status.Foreground = Palette.Accent; }
         }
 
-        private void RunAction(Action action)
+        private bool RunAction(Action action)
         {
-            try { action(); }
+            try { action(); return true; }
             catch (Microsoft.Data.Sqlite.SqliteException) { Report("The profile database is busy or unavailable. Try again."); }
             catch (Exception error) when (error is IOException or InvalidDataException or InvalidOperationException or ArgumentException or UnauthorizedAccessException or KeyNotFoundException or System.ComponentModel.Win32Exception) { Report(error.Message); }
+            return false;
         }
 
         private static string Fingerprint(IReadOnlyList<Profile> profiles) => string.Join("|", profiles.Select(profile => profile.Id + profile.Name + profile.IsActive + profile.HasNativeCredential + profile.MuxEndpointsFile));

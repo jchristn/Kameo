@@ -43,6 +43,7 @@ namespace Kameo.Desktop
             license.Margin = new Thickness(0, 10, 0, 0);
             Button close = Ui.Button("Close", Close);
             close.HorizontalAlignment = HorizontalAlignment.Center; close.MinWidth = 90; close.Margin = new Thickness(0, 12, 0, 0);
+            close.HorizontalContentAlignment = HorizontalAlignment.Center; close.VerticalContentAlignment = VerticalAlignment.Center;
             StackPanel content = Ui.Stack(mark, name, version, repository, copyright, license, close);
             content.Margin = new Thickness(28, 20, 28, 24);
             Content = content;

@@ -17,6 +17,8 @@ Alpha. Initial release.
 - Compact profile manager, 16 coordinated palettes, light/dark modes, and native macOS menus.
 - **Launch in...** chooses a directory for one session while preserving the saved launch folder.
 - Profile launch submenus, search width aligned with profile cards, and a shared About/startup splash design with palette-aware logos and a repository link.
+- The About and startup splash **Close** button centers its label.
+- The tray menu has **About Kameo**, and each harness submenu launches the selected profile with **Launch** or **Launch in...**.
 - Source-build lifecycle scripts for Windows, macOS, Linux, WSL, and WSL2.
 - Optional local .NET global-tool packaging for the `kameo` command, with build, install, rebuild, PATH, and removal instructions.
 - Unsigned installers for Windows, macOS, and Linux on x64 and ARM64: Inno Setup `.exe` and portable `.zip`; ad-hoc-signed `.pkg`, `.dmg`, and `.tar.gz`; `.deb`, `.rpm`, AppImage, and `.tar.gz`. Installers add `kameo` to `PATH` and register the tray app at sign-in. Built by `Kameo.Publisher` from `publisher.json` and published by a tag-triggered release workflow with `SHA256SUMS`.

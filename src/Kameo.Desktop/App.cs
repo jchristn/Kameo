@@ -19,8 +19,7 @@ namespace Kameo.Desktop
         private TrayIcon? _Tray;
         private DispatcherTimer? _Timer;
         private bool _Quitting;
-        private readonly NativeMenu _Menu = new NativeMenu();
-        private string _MenuFingerprint = "";
+        private TrayMenu? _TrayMenu;
 
         /// <inheritdoc />
         public override void Initialize()
@@ -56,8 +55,9 @@ namespace Kameo.Desktop
                     else if (!_Quitting) Quit();
                 };
                 using Stream icon = Assembly.GetExecutingAssembly().GetManifestResourceStream("Kameo.Logo")!;
+                _TrayMenu = new TrayMenu(_Store, _Window, Show, Quit);
                 RefreshTray();
-                _Tray = new TrayIcon { Menu = _Menu, Icon = new WindowIcon(icon), ToolTipText = "Kameo - agent profiles", IsVisible = true };
+                _Tray = new TrayIcon { Menu = _TrayMenu.Menu, Icon = new WindowIcon(icon), ToolTipText = "Kameo - agent profiles", IsVisible = true };
                 _Tray.Clicked += (_, _) => { if (!OperatingSystem.IsMacOS()) Show(); };
                 TrayIcon.SetIcons(this, new TrayIcons { _Tray });
                 _Timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -93,40 +93,6 @@ namespace Kameo.Desktop
             _Quitting = true;
             if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop) desktop.Shutdown();
         }
-        private void RefreshTray()
-        {
-            if (_Store == null) return;
-            System.Collections.Generic.IReadOnlyList<Profile> profiles = _Store.List();
-            string fingerprint = string.Join("|", profiles.Select(profile => profile.Id + profile.Name + profile.IsActive));
-            if (_Menu.Items.Count > 0 && fingerprint == _MenuFingerprint) return;
-            _MenuFingerprint = fingerprint;
-            NativeMenu menu = _Menu;
-            menu.Items.Clear();
-            NativeMenuItem manage = new NativeMenuItem("Manage profiles");
-            manage.Click += (_, _) => Show();
-            menu.Add(manage);
-            menu.Add(new NativeMenuItemSeparator());
-            foreach (HarnessKind harness in HarnessCatalog.All)
-            {
-                NativeMenu choices = new NativeMenu();
-                foreach (Profile profile in profiles.Where(profile => profile.Harness == harness))
-                {
-                    NativeMenuItem item = new NativeMenuItem(profile.Name) { ToggleType = MenuItemToggleType.Radio, IsChecked = profile.IsActive };
-                    item.Click += (_, _) =>
-                    {
-                        try { _Store.Select(profile.Id); _Window?.Refresh(); RefreshTray(); }
-                        catch (Exception error) when (error is InvalidOperationException or System.Collections.Generic.KeyNotFoundException or Microsoft.Data.Sqlite.SqliteException)
-                        { Show(); _Window?.Report("Could not select that profile. Refresh and try again."); }
-                    };
-                    choices.Add(item);
-                }
-                if (choices.Items.Count == 0) choices.Add(new NativeMenuItem("No profiles yet") { IsEnabled = false });
-                menu.Add(new NativeMenuItem(HarnessCatalog.Name(harness)) { Menu = choices });
-            }
-            menu.Add(new NativeMenuItemSeparator());
-            NativeMenuItem quit = new NativeMenuItem("Quit Kameo");
-            quit.Click += (_, _) => Quit();
-            menu.Add(quit);
-        }
+        private void RefreshTray() => _TrayMenu?.Refresh();
     }
 }
