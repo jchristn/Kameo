@@ -4,6 +4,11 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 ## [Unreleased]
 
+- Each profile card has its own **Launch** and **Launch in...** buttons, so any account can be launched without changing the selection. The separate launch card showing the `kameo claude`/`kameo codex` command is removed; **Use profile** still sets the profile used by terminal commands and the tray.
+
+- Plan usage for Claude Code and Codex native logins. **Check usage** in the desktop (also **View > Check Usage**) shows each login's 5-hour, weekly, and per-model windows with bars, percentages, and reset times. `kameo usage [claude|codex|ID] [--offline] [--json]` prints the same.
+- Claude Code usage is read with the profile's saved sign-in and is never refreshed by Kameo. Codex usage comes from the profile's isolated `codex app-server`, falling back to limits recorded in the profile's last session. API-key profiles report no plan limits.
+
 ## [0.1.0] - 2026-11-20
 
 Alpha. Initial release.

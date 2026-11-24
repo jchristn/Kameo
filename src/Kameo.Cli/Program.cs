@@ -69,6 +69,7 @@ namespace Kameo.Cli
                 case "delete": Require(args, 2); store.Delete(args[1]); return 0;
                 case "import": Require(args, 3); new CredentialFiles(store).Import(args[1], args[2]); return 0;
                 case "import-current": Require(args, 2); await new CurrentLoginImporter(store).ImportAsync(args[1], cancellationToken).ConfigureAwait(false); return 0;
+                case "usage": return await UsageAsync(store, args, cancellationToken).ConfigureAwait(false);
                 case "mux-config": Require(args, 5); new CredentialFiles(store).ConfigureMux(args[1], args[2], args[3], args[4]); return 0;
                 case "login":
                 case "run-profile":
@@ -82,6 +83,82 @@ namespace Kameo.Cli
                 default: throw new ArgumentException("Unknown command. Run kameo --help for usage.");
             }
         }
+
+        private static async Task<int> UsageAsync(ProfileStore store, string[] args, CancellationToken cancellationToken)
+        {
+            bool json = args.Contains("--json", StringComparer.Ordinal);
+            bool offline = args.Contains("--offline", StringComparer.Ordinal);
+            string[] targets = args.Skip(1).Where(argument => !argument.StartsWith("--", StringComparison.Ordinal)).ToArray();
+            if (targets.Length > 1 || args.Skip(1).Any(argument => argument.StartsWith("--", StringComparison.Ordinal) && argument is not "--json" and not "--offline"))
+                throw new ArgumentException("Usage: kameo usage [claude|codex|ID] [--offline] [--json]");
+            UsageService usage = new UsageService(store);
+            IReadOnlyList<UsageReport> reports;
+            bool single = targets.Length == 1 && targets[0].StartsWith("prf_", StringComparison.Ordinal);
+            if (single) reports = new[] { await usage.ReadAsync(targets[0], offline, cancellationToken).ConfigureAwait(false) };
+            else
+            {
+                HarnessKind? harness = targets.Length == 0 ? null : HarnessCatalog.Parse(targets[0]);
+                if (harness != null && !HarnessCatalog.SupportsUsage(harness.Value)) throw new ArgumentException("Plan usage is available for claude and codex.");
+                reports = await usage.ReadAllAsync(harness, offline, cancellationToken).ConfigureAwait(false);
+            }
+            if (json) { WriteUsageJson(reports); return 0; }
+            List<UsageReport> shown = reports.Where(report => single || report.Status != UsageStatus.NotApplicable).ToList();
+            if (shown.Count == 0) { Console.WriteLine("No Claude Code or Codex native-login profiles. API-key profiles have no plan limits."); return 0; }
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            foreach (UsageReport report in shown)
+            {
+                string heading = HarnessCatalog.Name(report.Harness) + "  " + report.ProfileName + (report.Plan.Length > 0 ? "  (" + report.Plan + ")" : "");
+                string observed = UsageFormat.Observed(report, now);
+                Console.WriteLine(observed.Length > 0 ? heading + "  " + observed : heading);
+                foreach (UsageWindow window in report.Windows)
+                {
+                    int filled = (int)Math.Round(Math.Clamp(window.UsedPercent, 0, 100) / 5, MidpointRounding.AwayFromZero);
+                    string reset = UsageFormat.Reset(window.ResetsAt, now);
+                    Console.WriteLine("  " + window.Label.PadRight(16) + UsageFormat.Percent(window.UsedPercent).PadLeft(5) + "  [" + new string('#', filled) + new string('-', 20 - filled) + "]" + (reset.Length > 0 ? "  " + reset : ""));
+                }
+                if (report.Detail.Length > 0) Console.WriteLine("  " + report.Detail);
+                if (report.Message.Length > 0) Console.WriteLine("  " + report.Message);
+            }
+            return 0;
+        }
+
+        private static void WriteUsageJson(IReadOnlyList<UsageReport> reports)
+        {
+            using Stream output = Console.OpenStandardOutput();
+            using (System.Text.Json.Utf8JsonWriter writer = new System.Text.Json.Utf8JsonWriter(output, new System.Text.Json.JsonWriterOptions { Indented = true }))
+            {
+                writer.WriteStartArray();
+                foreach (UsageReport report in reports)
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("profileId", report.ProfileId);
+                    writer.WriteString("profileName", report.ProfileName);
+                    writer.WriteString("harness", HarnessCatalog.Command(report.Harness));
+                    writer.WriteString("status", JsonName(report.Status.ToString()));
+                    writer.WriteString("source", JsonName(report.Source.ToString()));
+                    writer.WriteString("plan", report.Plan);
+                    writer.WriteString("detail", report.Detail);
+                    writer.WriteString("message", report.Message);
+                    if (report.ObservedUtc == null) writer.WriteNull("observedUtc"); else writer.WriteString("observedUtc", report.ObservedUtc.Value);
+                    writer.WriteStartArray("windows");
+                    foreach (UsageWindow window in report.Windows)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("label", window.Label);
+                        writer.WriteNumber("usedPercent", window.UsedPercent);
+                        if (window.ResetsAt == null) writer.WriteNull("resetsAt"); else writer.WriteString("resetsAt", window.ResetsAt.Value);
+                        if (window.WindowMinutes == null) writer.WriteNull("windowMinutes"); else writer.WriteNumber("windowMinutes", window.WindowMinutes.Value);
+                        writer.WriteEndObject();
+                    }
+                    writer.WriteEndArray();
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+            }
+            output.WriteByte((byte)'\n');
+        }
+
+        private static string JsonName(string value) => char.ToLowerInvariant(value[0]) + value[1..];
 
         private static string[] Tail(string[] args, int offset) => args.Length > offset && args[offset] == "--" ? args[(offset + 1)..] : args[offset..];
         private static void Require(string[] args, int count)
@@ -112,6 +189,8 @@ namespace Kameo.Cli
               import-current ID                        Import an existing local login
               login ID [-- --device-auth]               Native login (Mux: setup)
               mux-config ID ADAPTER URL MODEL          Configure a Mux API-key endpoint
+              usage [claude|codex|ID] [--offline] [--json]
+                                                       Show plan limits for native logins
               run HARNESS -- [ARGS...]                 Launch the selected profile
               run-profile ID -- [ARGS...]              Launch a specific profile
               claude|codex|antigravity|mux [ARGS...]     Shorthand for run (Antigravity launches agy)
@@ -120,6 +199,7 @@ namespace Kameo.Cli
             Antigravity Google accounts require CLI 1.5.7; paste browser codes into its terminal.
             Antigravity also supports API keys. Mux opens its endpoint setup wizard.
             Run with --device-auth only for Codex. Harnesses must already be installed.
+            usage contacts Claude with the saved login and starts codex app-server; --offline reads only Codex session logs.
             """);
     }
 }

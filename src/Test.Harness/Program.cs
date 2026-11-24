@@ -10,6 +10,7 @@ namespace Test.Harness
     {
         private static async Task<int> Main(string[] args)
         {
+            if (Array.IndexOf(args, "app-server") >= 0) return await AppServerAsync(args).ConfigureAwait(false);
             if (Array.IndexOf(args, "--version") >= 0)
             {
                 string home = Environment.GetEnvironmentVariable("KAMEO_HOME") ?? throw new InvalidOperationException("The fixture requires an isolated home.");
@@ -48,6 +49,49 @@ namespace Test.Harness
             }
             int exit = Array.IndexOf(args, "--exit");
             return exit >= 0 ? int.Parse(args[exit + 1], System.Globalization.CultureInfo.InvariantCulture) : 0;
+        }
+
+        /// <summary>
+        /// A synthetic Codex app-server. CODEX_HOME/fixture-mode.txt selects "ok", "error", "hang" or "exit";
+        /// CODEX_HOME/fixture-rate-limits.json supplies the rate-limit result. Records requests before answering usage.
+        /// </summary>
+        private static async Task<int> AppServerAsync(string[] args)
+        {
+            string home = Environment.GetEnvironmentVariable("CODEX_HOME") ?? throw new InvalidOperationException("The fixture requires CODEX_HOME.");
+            string modePath = Path.Combine(home, "fixture-mode.txt");
+            string mode = File.Exists(modePath) ? File.ReadAllText(modePath).Trim() : "ok";
+            JsonArray arguments = new JsonArray();
+            foreach (string argument in args) arguments.Add((JsonNode?)JsonValue.Create(argument));
+            JsonArray methods = new JsonArray();
+            string? line;
+            while ((line = await Console.In.ReadLineAsync().ConfigureAwait(false)) != null)
+            {
+                JsonNode? message = JsonNode.Parse(line);
+                string method = message?["method"]?.GetValue<string>() ?? "";
+                methods.Add((JsonNode?)JsonValue.Create(method));
+                if (method == "initialize")
+                {
+                    if (mode == "exit") return 1;
+                    Console.Out.WriteLine("{\"method\":\"configWarning\",\"params\":{\"summary\":\"synthetic\"}}");
+                    Console.Out.WriteLine("{\"id\":1,\"result\":{\"userAgent\":\"synthetic\",\"codexHome\":" + JsonValue.Create(home).ToJsonString() + "}}");
+                    Console.Out.Flush();
+                }
+                else if (method == "account/rateLimits/read")
+                {
+                    JsonObject capture = new JsonObject
+                    {
+                        ["arguments"] = arguments, ["methods"] = methods, ["cwd"] = Environment.CurrentDirectory, ["codexHome"] = home,
+                        ["params"] = message?["params"]?.DeepClone(), ["openAiKey"] = Environment.GetEnvironmentVariable("OPENAI_API_KEY")
+                    };
+                    await File.WriteAllTextAsync(Path.Combine(home, "app-server-capture.json"), capture.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
+                    if (mode == "hang") { await Task.Delay(30000, CancellationToken.None).ConfigureAwait(false); return 0; }
+                    Console.Out.WriteLine("{\"method\":\"account/rateLimits/updated\",\"params\":{}}");
+                    if (mode == "error") Console.Out.WriteLine("{\"id\":2,\"error\":{\"code\":-32600,\"message\":\"codex account authentication required to read rate limits\"}}");
+                    else Console.Out.WriteLine("{\"id\":2,\"result\":" + File.ReadAllText(Path.Combine(home, "fixture-rate-limits.json")) + "}");
+                    Console.Out.Flush();
+                }
+            }
+            return 0;
         }
     }
 }

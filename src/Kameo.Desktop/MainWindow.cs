@@ -11,7 +11,6 @@ namespace Kameo.Desktop
     using Avalonia.Controls;
     using Avalonia.Data;
     using Avalonia.Layout;
-    using Avalonia.Input.Platform;
     using Avalonia.Media;
     using Avalonia.Media.Imaging;
     using Avalonia.Platform.Storage;
@@ -25,6 +24,9 @@ namespace Kameo.Desktop
         private readonly Action _Quit;
         private readonly Func<CancellationToken, Task<string?>> _PickFolder;
         private readonly Action<string, bool, string> _OpenTerminal;
+        private readonly Func<string, CancellationToken, Task<UsageReport>> _ReadUsage;
+        private readonly Dictionary<string, UsageReport> _Usage = new Dictionary<string, UsageReport>();
+        private readonly HashSet<string> _CheckingUsage = new HashSet<string>();
         private HarnessKind _Harness = HarnessKind.Claude;
         private TextBox? _Search;
         private StackPanel? _Profiles;
@@ -39,13 +41,15 @@ namespace Kameo.Desktop
             : this(store, changed, quit, null, null) { }
 
         internal MainWindow(ProfileStore store, Action changed, Action quit,
-            Func<CancellationToken, Task<string?>>? pickFolder, Action<string, bool, string>? openTerminal)
+            Func<CancellationToken, Task<string?>>? pickFolder, Action<string, bool, string>? openTerminal,
+            Func<string, CancellationToken, Task<UsageReport>>? readUsage = null)
         {
             _Store = store;
             _Changed = changed;
             _Quit = quit;
             _PickFolder = pickFolder ?? PickFolderAsync;
             _OpenTerminal = openTerminal ?? ((id, login, directory) => TerminalLauncher.Open(_Store, id, login, directory));
+            _ReadUsage = readUsage ?? ((id, cancellationToken) => new UsageService(_Store).ReadAsync(id, false, cancellationToken));
             _Workspace = store.Preference("workspace") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (!Directory.Exists(_Workspace)) _Workspace = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             Title = "Kameo";
@@ -89,6 +93,7 @@ namespace Kameo.Desktop
             bar.Add(new NativeMenuItem("Profiles") { Menu = harnesses });
             bar.Add(NativeMenus.Submenu("View",
                 NativeMenus.Item("Refresh Profiles", Refresh, Avalonia.Input.Key.R),
+                NativeMenus.Item("Check Usage", () => _ = CheckUsageAsync(CancellationToken.None), Avalonia.Input.Key.U),
                 NativeMenus.Item("Appearance...", ShowAppearance),
                 NativeMenus.Item("Light Appearance", () => SetAppearance(false)),
                 NativeMenus.Item("Dark Appearance", () => SetAppearance(true))));
@@ -148,10 +153,20 @@ namespace Kameo.Desktop
             Grid.SetColumn(main, 1);
 
             Grid heading = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-            heading.Children.Add(Ui.Text(HarnessCatalog.Name(_Harness), 23, weight: FontWeight.SemiBold));
+            TextBlock title = Ui.Text(HarnessCatalog.Name(_Harness), 23, weight: FontWeight.SemiBold);
+            title.Name = "HarnessTitle";
+            heading.Children.Add(title);
             Button add = Ui.Button("+  Add profile", () => _ = EditAsync(null, CancellationToken.None), true);
-            add.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(add, 1); heading.Children.Add(add);
+            StackPanel headingActions = Ui.Row(add);
+            headingActions.VerticalAlignment = VerticalAlignment.Center;
+            if (HarnessCatalog.SupportsUsage(_Harness) && all.Any(profile => profile.Harness == _Harness && UsageService.Supports(profile)))
+            {
+                Button usage = Ui.Button("Check usage", () => _ = CheckUsageAsync(CancellationToken.None));
+                usage.IsEnabled = !all.Any(profile => _CheckingUsage.Contains(profile.Id) && profile.Harness == _Harness);
+                ToolTip.SetTip(usage, "Check plan limits for this harness's native logins. Uses each saved login without changing it.");
+                headingActions.Children.Insert(0, usage);
+            }
+            Grid.SetColumn(headingActions, 1); heading.Children.Add(headingActions);
 
             _Search = new TextBox { Name = "SearchProfiles", PlaceholderText = "Search profiles by name", Text = search, HorizontalAlignment = HorizontalAlignment.Left };
             _Search.TextChanged += (_, _) => RenderProfiles();
@@ -223,28 +238,6 @@ namespace Kameo.Desktop
             _Profiles.Children.Clear();
             IReadOnlyList<Profile> all = _Store.List();
             List<Profile> profiles = all.Where(profile => profile.Harness == _Harness).ToList();
-            Profile? active = profiles.FirstOrDefault(profile => profile.IsActive);
-            bool canLaunch = active != null && (active.Kind == CredentialKind.ApiKey || HarnessCatalog.SupportsNativeLogin(active.Harness));
-            StackPanel launch = Ui.Stack(
-                Ui.Text(active == null ? "No profile selected" : active.Name, 12, Palette.Accent, FontWeight.SemiBold),
-                Ui.Text("kameo " + HarnessCatalog.Command(_Harness), 17, weight: FontWeight.Medium));
-            Grid command = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-            command.Children.Add(launch);
-            Button launchIn = Ui.Button("Launch in...", () =>
-            {
-                if (active != null) _ = ChooseDirectoryAsync(active.Id, CancellationToken.None);
-            });
-            launchIn.IsEnabled = canLaunch;
-            ToolTip.SetTip(launchIn, "Choose a folder for this launch without changing your saved launch folder.");
-            Button launchDefault = Ui.Button("Launch", () =>
-            {
-                if (active != null) RunAction(() => _OpenTerminal(active.Id, false, _Workspace));
-            }, true);
-            launchDefault.IsEnabled = canLaunch;
-            StackPanel commandActions = Ui.Row(Ui.Button("Copy", () => _ = CopyAsync(CancellationToken.None)), launchIn, launchDefault);
-            commandActions.VerticalAlignment = VerticalAlignment.Center;
-            Grid.SetColumn(commandActions, 1); command.Children.Add(commandActions);
-            _Profiles.Children.Add(Ui.Card(command, true));
             if (profiles.Count == 0)
             {
                 _Profiles.Children.Add(Ui.Card(Ui.Stack(
@@ -265,10 +258,15 @@ namespace Kameo.Desktop
                     ? profile.HasNativeCredential ? "Google account saved · isolated login" : "Sign in with a Google account · CLI " + AntigravityCompatibility.SupportedVersion
                     : profile.MuxEndpointsFile.Length > 0 ? "Shared endpoints: " + Path.GetFileName(profile.MuxEndpointsFile)
                     : profile.Kind == CredentialKind.ApiKey ? "API key" : profile.HasNativeCredential ? "Native login saved" : "Sign in or import a login";
-                StackPanel actions = Ui.Row(
-                    Ui.Button(profile.IsActive ? "Selected" : "Use profile", () => RunAction(() => { _Store.Select(profile.Id); Refresh(); _Changed(); }), !profile.IsActive),
+                Button launch = Ui.Button("Launch", () => RunAction(() => _OpenTerminal(profile.Id, false, _Workspace)), true);
+                ToolTip.SetTip(launch, "Open a terminal in " + _Workspace + " with this profile.");
+                Button launchIn = Ui.Button("Launch in...", () => _ = ChooseDirectoryAsync(profile.Id, CancellationToken.None));
+                ToolTip.SetTip(launchIn, "Choose a folder for this launch without changing your saved launch folder.");
+                StackPanel actions = Ui.Row(launch, launchIn,
+                    Ui.Button(profile.IsActive ? "Selected" : "Use profile", () => RunAction(() => { _Store.Select(profile.Id); Refresh(); _Changed(); })),
                     Ui.Button("Edit", () => _ = EditAsync(profile.Id, CancellationToken.None)));
-                actions.Children[0].IsEnabled = !profile.IsActive;
+                actions.Children[2].IsEnabled = !profile.IsActive;
+                ToolTip.SetTip(actions.Children[2], "Make this the profile that kameo " + HarnessCatalog.Command(profile.Harness) + " and the tray launch.");
                 if (profile.Kind == CredentialKind.Native && profile.MuxEndpointsFile.Length == 0 && HarnessCatalog.SupportsNativeLogin(profile.Harness))
                 {
                     actions.Children.Add(Ui.Button(profile.Harness == HarnessKind.Mux ? "Setup" : "Sign in", () => RunAction(() => _OpenTerminal(profile.Id, true, _Workspace))));
@@ -282,7 +280,93 @@ namespace Kameo.Desktop
                 Control[] buttons = actions.Children.ToArray();
                 actions.Children.Clear();
                 foreach (Control button in buttons) wrappedActions.Children.Add(button);
-                _Profiles.Children.Add(Ui.Card(Ui.Stack(heading, Ui.Text(description, 12, Palette.Muted), wrappedActions)));
+                StackPanel card = Ui.Stack(heading, Ui.Text(description, 12, Palette.Muted));
+                if (UsageService.Supports(profile))
+                {
+                    if (_CheckingUsage.Contains(profile.Id)) card.Children.Add(Ui.Text("Checking usage...", 12, Palette.Muted));
+                    else if (_Usage.TryGetValue(profile.Id, out UsageReport? report)) card.Children.Add(BuildUsage(report));
+                }
+                card.Children.Add(wrappedActions);
+                _Profiles.Children.Add(Ui.Card(card));
+            }
+        }
+
+        private static Control BuildUsage(UsageReport report)
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            StackPanel panel = new StackPanel { Name = "Usage", Spacing = 18 };
+            if (report.Status == UsageStatus.Available)
+            {
+                foreach (UsageWindow window in report.Windows)
+                {
+                    Grid caption = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+                    caption.Children.Add(Ui.Text(window.Label, 13, weight: FontWeight.SemiBold));
+                    string reset = UsageFormat.Reset(window.ResetsAt, now);
+                    TextBlock amount = Ui.Text(UsageFormat.Percent(window.UsedPercent) + " used" + (reset.Length > 0 ? " · " + reset : ""), 12, Palette.Muted);
+                    amount.TextWrapping = TextWrapping.NoWrap;
+                    amount.VerticalAlignment = VerticalAlignment.Center;
+                    Grid.SetColumn(amount, 1); caption.Children.Add(amount);
+                    ProgressBar bar = new ProgressBar
+                    {
+                        Minimum = 0, Maximum = 100, Value = Math.Clamp(window.UsedPercent, 0, 100), Height = 8, MinHeight = 8,
+                        CornerRadius = new CornerRadius(4), HorizontalAlignment = HorizontalAlignment.Stretch,
+                        Foreground = window.UsedPercent >= 90 ? Palette.Danger : Palette.Accent, Background = Palette.Border
+                    };
+                    StackPanel row = new StackPanel { Spacing = 8 };
+                    row.Children.Add(caption);
+                    row.Children.Add(bar);
+                    panel.Children.Add(row);
+                }
+            }
+            string summary = string.Join(" · ", new[] { report.Plan, report.Detail, UsageFormat.Observed(report, now) }.Where(part => part.Length > 0));
+            if (summary.Length > 0) panel.Children.Add(Ui.Text(summary, 12, Palette.Muted));
+            if (report.Message.Length > 0)
+                panel.Children.Add(Ui.Text(report.Message, 12, report.Status is UsageStatus.Unavailable or UsageStatus.Expired ? Palette.Danger : Palette.Muted));
+            return new Border
+            {
+                Background = Palette.Background, BorderBrush = Palette.Border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(16, 14), Margin = new Thickness(0, 8, 0, 8), Child = panel
+            };
+        }
+
+        /// <summary>Checks plan usage for every native login of the current harness and shows the results on their cards.</summary>
+        internal async Task CheckUsageAsync(CancellationToken cancellationToken)
+        {
+            HarnessKind harness = _Harness;
+            if (!HarnessCatalog.SupportsUsage(harness)) { Report("Plan usage is available for Claude Code and Codex native logins."); return; }
+            List<Profile> profiles;
+            try { profiles = _Store.List().Where(profile => profile.Harness == harness && UsageService.Supports(profile) && !_CheckingUsage.Contains(profile.Id)).ToList(); }
+            catch (Microsoft.Data.Sqlite.SqliteException) { Report("The profile database is busy or unavailable. Try again."); return; }
+            if (profiles.Count == 0)
+            {
+                if (!_CheckingUsage.Any()) Report("Add a native login to see plan usage. API keys have no plan limits.");
+                return;
+            }
+            foreach (Profile profile in profiles) _CheckingUsage.Add(profile.Id);
+            Refresh();
+            if (_Status != null) { _Status.Text = "Checking " + HarnessCatalog.Name(harness) + " usage..."; _Status.Foreground = Palette.Muted; }
+            using SemaphoreSlim gate = new SemaphoreSlim(4);
+            async Task CheckAsync(Profile profile)
+            {
+                await gate.WaitAsync(cancellationToken);
+                UsageReport report;
+                try { report = await _ReadUsage(profile.Id, cancellationToken); }
+                catch (OperationCanceledException) { _CheckingUsage.Remove(profile.Id); return; }
+                catch (Exception error) when (error is IOException or InvalidOperationException or KeyNotFoundException or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
+                {
+                    report = new UsageReport { ProfileId = profile.Id, ProfileName = profile.Name, Harness = profile.Harness, Status = UsageStatus.Unavailable, Message = "Unable to read usage for this profile." };
+                }
+                finally { gate.Release(); }
+                _Usage[profile.Id] = report;
+                _CheckingUsage.Remove(profile.Id);
+                RenderProfiles();
+            }
+            try { await Task.WhenAll(profiles.Select(CheckAsync)); }
+            finally
+            {
+                foreach (Profile profile in profiles) _CheckingUsage.Remove(profile.Id);
+                Refresh();
+                if (_Status != null) { _Status.Text = HarnessCatalog.Name(harness) + " usage checked."; _Status.Foreground = Palette.Accent; }
             }
         }
 
@@ -360,13 +444,6 @@ namespace Kameo.Desktop
             { Title = "Choose a launch directory", AllowMultiple = false, SuggestedStartLocation = start });
             try { return folders.Count == 0 ? null : folders[0].TryGetLocalPath() ?? throw new InvalidOperationException("Choose a local launch folder."); }
             finally { foreach (IStorageFolder folder in folders) folder.Dispose(); }
-        }
-
-        private async Task CopyAsync(CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (Clipboard != null) await Clipboard.SetTextAsync("kameo " + HarnessCatalog.Command(_Harness));
-            if (_Status != null) { _Status.Text = "Launch command copied."; _Status.Foreground = Palette.Accent; }
         }
 
         private bool RunAction(Action action)

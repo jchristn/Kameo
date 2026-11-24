@@ -26,6 +26,8 @@ namespace Kameo.Core
         public static string Executable(HarnessKind kind) => kind == HarnessKind.Antigravity ? "agy" : Command(kind);
         /// <summary>Whether Kameo can isolate native account authentication for this harness.</summary>
         public static bool SupportsNativeLogin(HarnessKind kind) => Enum.IsDefined(kind);
+        /// <summary>Whether Kameo can read subscription plan usage for this harness's native logins.</summary>
+        public static bool SupportsUsage(HarnessKind kind) => kind is HarnessKind.Claude or HarnessKind.Codex;
         /// <summary>Parses a harness command name.</summary>
         /// <exception cref="ArgumentException">The name is unsupported.</exception>
         public static HarnessKind Parse(string value) => value.ToLowerInvariant() switch

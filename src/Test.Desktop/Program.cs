@@ -51,7 +51,27 @@ namespace Test.Desktop
                 return true;
             }, cancellationToken), tags: new[] { "desktop", "isolated" }));
 
-            Add("EmptyStateHasDisabledLaunch", (window, store) => Check(!Button(window, "Launch").IsEnabled && !Button(window, "Launch in...").IsEnabled && Text(window).Contains("No profiles yet", StringComparison.Ordinal), "Empty state is missing or can launch without a profile."));
+            Add("EmptyStateHasNoLaunch", (window, store) => Check(!window.GetVisualDescendants().OfType<Button>().Any(button => button.Content as string is "Launch" or "Launch in...") && Text(window).Contains("No profiles yet", StringComparison.Ordinal) && !Text(window).Contains("kameo claude", StringComparison.Ordinal), "Empty state is missing, can launch without a profile, or shows a command card."));
+            Add("EachProfileLaunchesItself", (_, store) =>
+            {
+                Profile work = store.Create(new Profile { Harness = HarnessKind.Claude, Name = "Work", ApiKey = "synthetic" });
+                Profile personal = store.Create(new Profile { Harness = HarnessKind.Claude, Name = "Personal", ApiKey = "synthetic" });
+                string chosen = Directory.CreateDirectory(Path.Combine(store.Root, "Chosen")).FullName;
+                store.SetPreference("workspace", store.Root);
+                List<string> launches = new List<string>();
+                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(chosen), (id, login, directory) => { Check(!login, "Launch started a login."); launches.Add(id + "@" + directory); });
+                try
+                {
+                    window.Show(); Sync(window);
+                    Button[] launchButtons = window.GetVisualDescendants().OfType<Button>().Where(button => button.Content as string == "Launch").ToArray();
+                    Button[] launchInButtons = window.GetVisualDescendants().OfType<Button>().Where(button => button.Content as string == "Launch in...").ToArray();
+                    Check(launchButtons.Length == 2 && launchInButtons.Length == 2, "Each profile card needs Launch and Launch in....");
+                    Click(launchButtons[0]); Click(launchButtons[1]); Click(launchInButtons[0]);
+                    Check(launches.SequenceEqual(new[] { personal.Id + "@" + store.Root, work.Id + "@" + store.Root, personal.Id + "@" + chosen }), "Card launches used the wrong profile or folder: " + string.Join(", ", launches));
+                    Check(store.Selected(HarnessKind.Claude).Id == work.Id && store.Preference("workspace") == store.Root, "Launching a card changed the selection or saved folder.");
+                }
+                finally { window.Close(); }
+            });
             Add("LaunchInPreservesDefaultFolder", (_, store) =>
             {
                 string chosen = Directory.CreateDirectory(Path.Combine(store.Root, "Project with spaces")).FullName;
@@ -145,7 +165,7 @@ namespace Test.Desktop
                         Click((NativeMenuItem)choices.Items[0]); Check(launches.Last() == second.Id, "Menu launched a stale selection.");
                         window.RefreshIfChanged(); Check(((NativeMenuItem)choices.Items[0]).Header == "Launch Second", "Selection label did not refresh.");
                         Click((NativeMenuItem)choices.Items[1]); Check(launches.Last() == second.Id, "Menu Launch in used a different profile.");
-                        Click((NativeMenuItem)choices.Items[3]); Check(Text(window).Contains("kameo " + HarnessCatalog.Command(harness), StringComparison.Ordinal), "Manage profiles did not navigate.");
+                        Click((NativeMenuItem)choices.Items[3]); Check(Title(window) == HarnessCatalog.Name(harness), "Manage profiles did not navigate.");
                         store.Delete(second.Id); store.Delete(first.Id); window.RefreshIfChanged();
                         Check(!((NativeMenuItem)choices.Items[0]).IsEnabled, "Deleted profiles remain launchable.");
                     }
@@ -237,7 +257,7 @@ namespace Test.Desktop
                 NativeMenuItem profiles = menu.Items.OfType<NativeMenuItem>().Single(item => item.Header == "Profiles");
                 Check(profiles.Menu!.Items.Count == 4, "All harnesses must be in the native menu.");
                 Button mux = window.GetVisualDescendants().OfType<Button>().Single(button => button.Content is Grid grid && grid.Children.OfType<TextBlock>().Any(text => text.Text == "Mux"));
-                Click(mux); Check(Text(window).Contains("kameo mux", StringComparison.Ordinal), "Harness navigation did not update the launch command.");
+                Click(mux); Check(Title(window) == "Mux", "Harness navigation did not update the heading.");
             });
             Add("EditorValidation", (window, store) =>
             {
@@ -326,7 +346,7 @@ namespace Test.Desktop
                 authentication.SelectedIndex = 0; Dispatcher.UIThread.RunJobs();
                 Field(editor, "ProfileName").Text = "Google API"; Field(editor, "ApiKey").Text = "synthetic-google-key";
                 Click(Button(editor, "Save profile")); window.Refresh();
-                Check(store.Selected(HarnessKind.Antigravity).Kind == CredentialKind.ApiKey && Text(window).Contains("kameo antigravity", StringComparison.Ordinal), "Antigravity API profile did not produce the current wrapper command.");
+                Check(store.Selected(HarnessKind.Antigravity).Kind == CredentialKind.ApiKey && Text(window).Contains("Google API", StringComparison.Ordinal) && Button(window, "Launch").IsEnabled, "Antigravity API profile is not launchable from its card.");
             });
             Add("AntigravityAccountCreationAndCredentialStatus", (window, store) =>
             {
@@ -355,6 +375,52 @@ namespace Test.Desktop
                 }
                 finally { window.Close(); }
             });
+            AddAsync("UsageCheckShowsPlanLimitsPerLogin", async (_, store, cancellationToken) =>
+            {
+                Profile work = store.Create(new Profile { Harness = HarnessKind.Codex, Kind = CredentialKind.Native, Name = "Codex Work" });
+                Profile personal = store.Create(new Profile { Harness = HarnessKind.Codex, Kind = CredentialKind.Native, Name = "Codex Personal" });
+                store.Create(new Profile { Harness = HarnessKind.Codex, Kind = CredentialKind.ApiKey, Name = "Codex Key", ApiKey = "synthetic" });
+                store.Create(new Profile { Harness = HarnessKind.Claude, Kind = CredentialKind.ApiKey, Name = "Claude Key", ApiKey = "synthetic" });
+                List<string> checkedIds = new List<string>();
+                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root), (id, login, directory) => { }, (id, token) =>
+                {
+                    checkedIds.Add(id);
+                    UsageReport report = id == work.Id
+                        ? new UsageReport
+                        {
+                            ProfileId = id, ProfileName = "Codex Work", Harness = HarnessKind.Codex, Status = UsageStatus.Available, Source = UsageSource.Live, Plan = "Pro",
+                            Detail = "Credits 2,500", ObservedUtc = DateTimeOffset.UtcNow,
+                            Windows = new[] { new UsageWindow("5-hour", 42, DateTimeOffset.UtcNow.AddHours(2), 300), new UsageWindow("Weekly", 95, null, 10080) }
+                        }
+                        : new UsageReport { ProfileId = id, ProfileName = "Codex Personal", Harness = HarnessKind.Codex, Status = UsageStatus.Expired, Message = "The saved sign-in has expired." };
+                    return Task.FromResult(report);
+                });
+                try
+                {
+                    window.Show();
+                    Navigate(window, "Claude Code");
+                    Check(!window.GetVisualDescendants().OfType<Button>().Any(button => button.Content as string == "Check usage"), "API-key-only harnesses should not offer usage checks.");
+                    Navigate(window, "Codex");
+                    Click(Button(window, "Check usage"));
+                    await Task.Delay(20, cancellationToken);
+                    string text = Text(window);
+                    Check(checkedIds.OrderBy(id => id, StringComparer.Ordinal).SequenceEqual(new[] { work.Id, personal.Id }.OrderBy(id => id, StringComparer.Ordinal)), "Usage should be checked once for each native login only.");
+                    Check(text.Contains("5-hour", StringComparison.Ordinal) && text.Contains("42% used · resets in", StringComparison.Ordinal) && text.Contains("95% used", StringComparison.Ordinal)
+                        && text.Contains("Pro · Credits 2,500 · Live, ", StringComparison.Ordinal), "Usage windows or plan summary are missing.");
+                    Check(text.Contains("The saved sign-in has expired.", StringComparison.Ordinal) && text.Contains("Codex usage checked.", StringComparison.Ordinal), "Failure messages or completion status are missing.");
+                    ProgressBar[] bars = window.GetVisualDescendants().OfType<ProgressBar>().ToArray();
+                    Check(bars.Length == 2 && bars[0].Value == 42 && bars[1].Value == 95, "Usage bars are wrong.");
+                    Check(window.GetVisualDescendants().OfType<StackPanel>().Count(panel => panel.Name == "Usage") == 2, "Each native login should show its own usage.");
+                    window.Refresh(); Sync(window);
+                    Check(window.GetVisualDescendants().OfType<ProgressBar>().Count() == 2, "Usage should survive a refresh.");
+                    Navigate(window, "Mux");
+                    Check(!window.GetVisualDescendants().OfType<Button>().Any(button => button.Content as string == "Check usage"), "Unsupported harnesses should not offer usage checks.");
+                    NativeMenu view = NativeMenu.GetMenu(window)!.Items.OfType<NativeMenuItem>().Single(item => item.Header == "View").Menu!;
+                    Click(view.Items.OfType<NativeMenuItem>().Single(item => item.Header == "Check Usage"));
+                    Check(Text(window).Contains("Plan usage is available for Claude Code and Codex", StringComparison.Ordinal) && checkedIds.Count == 2, "The menu should explain unsupported harnesses without checking.");
+                }
+                finally { window.Close(); }
+            });
             return await ConsoleRunner.RunMainAsync(new[] { new TestSuiteDescriptor("Desktop", "Desktop workflows and native menu contracts", cases) }, args).ConfigureAwait(false);
         }
 
@@ -378,6 +444,7 @@ namespace Test.Desktop
         private static void Navigate(MainWindow window, string harness) => Click(window.GetVisualDescendants().OfType<Button>().Single(button => button.Content is Grid grid && grid.Children.OfType<TextBlock>().Any(text => text.Text == harness)));
         private static TextBox Field(Window window, string name) { Sync(window); return window.GetVisualDescendants().OfType<TextBox>().Single(field => field.Name == name); }
         private static string Text(Window window) { Sync(window); return string.Join("\n", window.GetVisualDescendants().OfType<TextBlock>().Select(text => text.Text)); }
+        private static string? Title(Window window) { Sync(window); return window.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Name == "HarnessTitle").Text; }
         private static void Sync(Window window) { window.UpdateLayout(); Dispatcher.UIThread.RunJobs(); window.UpdateLayout(); }
         private static void Click(Button button) { button.RaiseEvent(new RoutedEventArgs(Avalonia.Controls.Button.ClickEvent)); Dispatcher.UIThread.RunJobs(); }
         private static void Click(NativeMenuItem item)

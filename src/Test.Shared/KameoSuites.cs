@@ -10,7 +10,7 @@ namespace Test.Shared
     public sealed class KameoSuites : ITestSuiteProvider
     {
         /// <summary>Fresh descriptors for the complete suite.</summary>
-        public static IReadOnlyList<TestSuiteDescriptor> All => new[] { StorageCases.Build(), CredentialCases.Build(), LaunchCases.Build(), LifecycleCases.Build(), CliCases.Build(), MuxEndpointCases.Build(), AntigravityCases.Build(), PublisherCases.Build() };
+        public static IReadOnlyList<TestSuiteDescriptor> All => new[] { StorageCases.Build(), CredentialCases.Build(), LaunchCases.Build(), LifecycleCases.Build(), CliCases.Build(), MuxEndpointCases.Build(), AntigravityCases.Build(), UsageCases.Build(), PublisherCases.Build() };
         /// <inheritdoc />
         public IReadOnlyList<TestSuiteDescriptor> Suites => All;
 
