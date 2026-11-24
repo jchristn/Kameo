@@ -16,7 +16,7 @@ Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. I
 - Independent selections for Claude Code, Codex, Antigravity, and Mux.
 - Shared Mux endpoints files: choose one JSON file for multiple profiles and pick up source changes at the next launch.
 - Plan usage for Claude Code and Codex native logins: each login's 5-hour, weekly, and model limits with reset times, checked when you open the harness and reused for 15 minutes. **Launch lowest usage** starts the login with the most headroom, and `kameo usage` prints the same in a terminal or as JSON.
-- Tray launching, **Launch in...**, profile selection, and About, plus search, launch-folder selection, and a compact desktop manager.
+- A tray menu with a submenu per profile (**Launch**, **Launch in...**, **Use as default**), **Lowest usage** for Claude Code and Codex, and About, plus search, launch-folder selection, and a compact desktop manager.
 - 16 palettes with coordinated light and dark backgrounds, panels, and accents: Fern, Ocean, Iris, Amber, Rose, Graphite, Seafoam, Lagoon, Cobalt, Lavender, Coral, Sand, Espresso, Midnight, Paper, and Nord.
 - Native macOS application menus, including About, Edit, Profiles, View, Window, and Quit. Profiles submenus launch the selected account in your saved folder or a folder chosen for that session.
 - Palette-aware About and two-second startup splash screens with the project logo and GitHub link. Background tray startup stays unobtrusive.
@@ -136,7 +136,9 @@ Remove any Kameo `PATH` entries, aliases, shortcuts, or symlinks you added manua
 2. Choose **API key** or **Native login / import**. For Antigravity, choose **Google account** or **API key**. For Mux, choose **API key** and enter the adapter, endpoint, and model, or choose **Endpoints file / setup** and browse to an existing endpoints JSON file.
 3. For native authentication, click **Sign in** to open the harness in a terminal, or **Import** to copy this computer's current login or select a native credential JSON file. The gear icon edits a profile and the trash icon deletes it. Mux's **Setup** opens its interactive TUI and first-run wizard; an existing Mux profile can use its F1 setup command.
 4. Click **Launch** on a profile's card to start it in the saved launch folder, or **Launch in...** to choose a folder for this session only. Every profile has its own buttons, so you can launch any account without changing the selection.
-5. Click **Use profile** or choose the profile from the tray to make it the selected profile, which `kameo claude`, `kameo codex`, and the other terminal commands use. The first profile for a harness is selected automatically. Each harness submenu in the tray also has **Launch** and **Launch in...** for the selected profile. Canceling the folder picker starts nothing; choosing a folder with **Launch in...** does not change the saved launch folder in the sidebar.
+5. Click **Use profile**, or **Use as default** in the tray, to make it the selected profile, which `kameo claude`, `kameo codex`, and the other terminal commands use. The first profile for a harness is selected automatically.
+
+   In the tray, each harness lists its profiles, with a tick on the selected one. Each profile opens a submenu with **Launch**, **Launch in...**, and **Use as default**. Claude Code and Codex with two or more native logins also have **Lowest usage** at the top, which launches the login with the most headroom. Canceling the folder picker starts nothing; choosing a folder with **Launch in...** does not change the saved launch folder in the sidebar.
 
 The executable field accepts an executable name, absolute native executable path, or JavaScript entry point. On Windows, standard npm `.cmd` shims are resolved to their JavaScript entry points and launched with Node.js. Arbitrary batch files are rejected, so harness arguments never pass through `cmd.exe` inside Kameo.
 

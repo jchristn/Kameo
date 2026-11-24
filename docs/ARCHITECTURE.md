@@ -76,7 +76,7 @@ When a live check fails, or with `--offline`, Kameo reads the newest `token_coun
 
 The compact shell uses the supplied chameleon assets, a harness sidebar, and a card per profile with its own **Launch** and **Launch in...** actions, selection, editing, sign-in and import, and plan usage when checked. Sixteen palettes provide coordinated light/dark colors across custom content and Fluent control resources. Appearance selections are saved locally. UI text is English in this alpha.
 
-The macOS application menu is registered during application initialization, before Avalonia installs its default menu. Window menus are attached to their respective windows, including editing commands in profile dialogs. A tray's `NativeMenu` is initialized before attaching the tray and is updated in place. Replacing an exported tray menu caused the initial macOS crash and is now covered by the native lifecycle smoke test.
+The macOS application menu is registered during application initialization, before Avalonia installs its default menu. Window menus are attached to their respective windows, including editing commands in profile dialogs. A tray's `NativeMenu` is initialized before attaching the tray and is updated in place. Each harness has a submenu per profile (Launch, Launch in..., Use as default), ticked for the selection; Claude Code and Codex with two or more native logins add Lowest usage, which shares the manager window's usage cache and lowest-usage choice. Replacing an exported tray menu caused the initial macOS crash and is now covered by the native lifecycle smoke test.
 
 ## Extending harness support
 

@@ -172,13 +172,17 @@ namespace Test.Desktop
                 }
                 finally { window.Close(); }
             });
-            Add("TrayMenuShowsAboutAndLaunchesTheCurrentSelection", (_, store) =>
+            AddAsync("TrayMenuLaunchesEachProfileAndLowestUsage", async (_, store, cancellationToken) =>
             {
                 store.SetPreference("workspace", store.Root);
                 List<string> launches = new List<string>();
                 List<string> folders = new List<string>();
+                Dictionary<string, double> usage = new Dictionary<string, double>();
                 MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root),
-                    (id, login, directory) => { Check(!login, "Tray launch used login mode."); launches.Add(id); folders.Add(directory); });
+                    (id, login, directory) => { Check(!login, "Tray launch used login mode."); launches.Add(id); folders.Add(directory); },
+                    (id, token) => Task.FromResult(usage.TryGetValue(id, out double used)
+                        ? new UsageReport { ProfileId = id, Status = UsageStatus.Available, Source = UsageSource.Live, Windows = new[] { new UsageWindow("Weekly", used, null, 10080) } }
+                        : new UsageReport { ProfileId = id, Status = UsageStatus.SignedOut, Message = "Sign in." }));
                 int shown = 0; int quits = 0;
                 try
                 {
@@ -186,6 +190,7 @@ namespace Test.Desktop
                     tray.Refresh();
                     NativeMenu menu = tray.Menu;
                     NativeMenuItem Top(string header) => menu.Items.OfType<NativeMenuItem>().Single(item => item.Header == header);
+                    NativeMenuItem Child(NativeMenu parent, string header) => parent.Items.OfType<NativeMenuItem>().Single(item => item.Header == header);
                     Check(menu.Items.OfType<NativeMenuItem>().First().Header == "About Kameo", "Tray About is not the first item.");
                     Click(Top("About Kameo")); Dispatcher.UIThread.RunJobs();
                     AboutWindow about = window.OwnedWindows.OfType<AboutWindow>().Single();
@@ -193,22 +198,43 @@ namespace Test.Desktop
                     foreach (HarnessKind harness in HarnessCatalog.All)
                     {
                         NativeMenu choices = Top(HarnessCatalog.Name(harness)).Menu!;
-                        Check(!((NativeMenuItem)choices.Items[0]).IsEnabled && !((NativeMenuItem)choices.Items[1]).IsEnabled, "An empty harness can launch from the tray.");
+                        Check(choices.Items.Count == 1 && !((NativeMenuItem)choices.Items[0]).IsEnabled && ((NativeMenuItem)choices.Items[0]).Header == "No profiles yet", "An empty harness should only say it has no profiles.");
                         Profile first = store.Create(new Profile { Harness = harness, Name = "First", Kind = CredentialKind.Native });
                         Profile second = store.Create(new Profile { Harness = harness, Name = "Second", Kind = CredentialKind.ApiKey, ApiKey = "synthetic" });
                         tray.Refresh(); Check(ReferenceEquals(menu, tray.Menu), "Tray menu was replaced.");
                         choices = Top(HarnessCatalog.Name(harness)).Menu!;
-                        NativeMenuItem launch = (NativeMenuItem)choices.Items[0];
-                        Check(launch.IsEnabled && launch.Header == "Launch First", "Tray launch is unavailable for the selected profile.");
+                        Check(choices.Items.OfType<NativeMenuItem>().Select(item => item.Header).SequenceEqual(new[] { "First", "Second" }), "Each profile should be its own submenu, without a separate launch item.");
+                        NativeMenuItem firstItem = Child(choices, "First");
+                        Check(firstItem.IsChecked && !Child(choices, "Second").IsChecked, "The selected profile should be ticked.");
+                        Check(firstItem.Menu!.Items.OfType<NativeMenuItem>().Where(item => item is not NativeMenuItemSeparator).Select(item => item.Header).SequenceEqual(new[] { "Launch", "Launch in...", "Use as default" }), "A profile submenu should offer Launch, Launch in... and Use as default.");
+                        Check(!Child(firstItem.Menu!, "Use as default").IsEnabled && Child(firstItem.Menu!, "Use as default").IsChecked, "The default profile's Use as default should be ticked and disabled.");
                         int shownBefore = shown;
-                        Click(launch); Check(launches.Last() == first.Id && folders.Last() == store.Root && shown == shownBefore, "Tray launch used the wrong profile or folder, or opened the manager.");
-                        NativeMenuItem pickSecond = choices.Items.OfType<NativeMenuItem>().Single(item => item.Header == "Second");
-                        Click(pickSecond); Check(store.Selected(harness).Id == second.Id, "Tray selection did not change the profile.");
+                        Click(Child(firstItem.Menu!, "Launch")); Check(launches.Last() == first.Id && folders.Last() == store.Root && shown == shownBefore, "Tray launch used the wrong profile or folder, or opened the manager.");
+                        NativeMenu secondMenu = Child(choices, "Second").Menu!;
+                        Click(Child(secondMenu, "Launch")); Check(launches.Last() == second.Id && store.Selected(harness).Id == first.Id, "Launching a profile should not change the default.");
+                        Click(Child(secondMenu, "Launch in...")); await Task.Delay(10, cancellationToken);
+                        Check(launches.Last() == second.Id && shown > shownBefore, "Tray Launch in did not use the manager's folder picker.");
+                        Click(Child(secondMenu, "Use as default")); Check(store.Selected(harness).Id == second.Id, "Use as default did not change the profile.");
                         choices = Top(HarnessCatalog.Name(harness)).Menu!;
-                        Check(((NativeMenuItem)choices.Items[0]).Header == "Launch Second", "Tray launch label did not follow the selection.");
-                        Click((NativeMenuItem)choices.Items[1]); Check(launches.Last() == second.Id && shown > shownBefore, "Tray Launch in did not use the manager's folder picker.");
-                        store.Delete(second.Id); store.Delete(first.Id); tray.Refresh();
-                        Check(!((NativeMenuItem)Top(HarnessCatalog.Name(harness)).Menu!.Items[0]).IsEnabled, "Deleted profiles remain launchable from the tray.");
+                        Check(Child(choices, "Second").IsChecked && !Child(choices, "First").IsChecked, "The tick did not follow the default.");
+                        Profile third = store.Create(new Profile { Harness = harness, Name = "Third", Kind = CredentialKind.Native });
+                        tray.Refresh(); choices = Top(HarnessCatalog.Name(harness)).Menu!;
+                        if (HarnessCatalog.SupportsUsage(harness))
+                        {
+                            Check(choices.Items[0] is NativeMenuItem { Header: "Lowest usage" } && choices.Items[1] is NativeMenuItemSeparator, "Lowest usage should come first, then a separator.");
+                            NativeMenu lowest = ((NativeMenuItem)choices.Items[0]).Menu!;
+                            Check(lowest.Items.OfType<NativeMenuItem>().Select(item => item.Header).SequenceEqual(new[] { "Launch", "Launch in..." }), "Lowest usage should offer Launch and Launch in....");
+                            usage[first.Id] = 70; usage[third.Id] = 20;
+                            Click(Child(lowest, "Launch")); await Task.Delay(20, cancellationToken);
+                            Check(launches.Last() == third.Id && folders.Last() == store.Root && store.Selected(harness).Id == second.Id, "Lowest usage should launch the native login with the most headroom.");
+                            usage[first.Id] = 5;
+                            await window.CheckUsageAsync(harness, true, cancellationToken);
+                            Click(Child(lowest, "Launch in...")); await Task.Delay(20, cancellationToken);
+                            Check(launches.Last() == first.Id, "Lowest usage Launch in... should launch the lowest login through the folder picker.");
+                        }
+                        else Check(!choices.Items.OfType<NativeMenuItem>().Any(item => item.Header == "Lowest usage"), HarnessCatalog.Name(harness) + " has no usage, so it should not offer Lowest usage.");
+                        store.Delete(second.Id); store.Delete(first.Id); store.Delete(third.Id); tray.Refresh();
+                        Check(((NativeMenuItem)Top(HarnessCatalog.Name(harness)).Menu!.Items[0]).Header == "No profiles yet", "Deleted profiles remain in the tray.");
                     }
                     Click(Top("Quit Kameo")); Check(quits == 1, "Tray Quit did not quit.");
                 }

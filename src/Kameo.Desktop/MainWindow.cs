@@ -82,6 +82,17 @@ namespace Kameo.Desktop
         /// <param name="harness">The harness whose selected profile is launched.</param>
         internal void LaunchSelectedIn(HarnessKind harness) => RunAction(() => { _ = ChooseDirectoryAsync(_Store.Selected(harness).Id, CancellationToken.None); });
 
+        /// <summary>Opens a terminal for a specific profile in the saved launch folder.</summary>
+        /// <returns>True when the terminal opened; false when a failure was reported in this window.</returns>
+        internal bool LaunchProfile(string id) => RunAction(() => _OpenTerminal(id, false, _Workspace));
+
+        /// <summary>Asks for a folder, then opens a terminal there for a specific profile.</summary>
+        internal void LaunchProfileIn(string id) => _ = ChooseDirectoryAsync(id, CancellationToken.None);
+
+        /// <summary>Whether a harness offers Launch lowest usage: Claude Code or Codex with at least two native logins.</summary>
+        internal static bool OffersLowestUsage(HarnessKind harness, IEnumerable<Profile> profiles) =>
+            HarnessCatalog.SupportsUsage(harness) && profiles.Count(profile => profile.Harness == harness && UsageService.Supports(profile)) > 1;
+
         private void InstallNativeMenus()
         {
             NativeMenu bar = new NativeMenu();
@@ -194,9 +205,9 @@ namespace Kameo.Desktop
                 usage.IsEnabled = !checking;
                 ToolTip.SetTip(usage, "Check plan limits now. Results are otherwise reused for 15 minutes. Uses each saved login without changing it.");
                 headingActions.Children.Insert(0, usage);
-                if (natives.Count > 1)
+                if (OffersLowestUsage(_Harness, all))
                 {
-                    Button lowest = Ui.Button("Launch lowest usage", () => _ = LaunchLowestAsync(CancellationToken.None));
+                    Button lowest = Ui.Button("Launch lowest usage", () => _ = LaunchLowestAsync(_Harness, false, CancellationToken.None));
                     UsageReport? least = UsageService.LeastUsed(natives.Where(profile => _Usage.ContainsKey(profile.Id)).Select(profile => _Usage[profile.Id]));
                     Profile? leastProfile = least == null ? null : natives.FirstOrDefault(profile => profile.Id == least.ProfileId);
                     ToolTip.SetTip(lowest, leastProfile == null
@@ -391,9 +402,11 @@ namespace Kameo.Desktop
         /// Checks plan usage for the current harness's native logins and shows the results on their cards. Unless
         /// <paramref name="force"/> is set, a login checked within <see cref="UsageCacheDuration"/> is not checked again.
         /// </summary>
-        internal async Task CheckUsageAsync(bool force, CancellationToken cancellationToken)
+        internal Task CheckUsageAsync(bool force, CancellationToken cancellationToken) => CheckUsageAsync(_Harness, force, cancellationToken);
+
+        /// <summary>Checks plan usage for a harness's native logins, whether or not that harness is on screen.</summary>
+        internal async Task CheckUsageAsync(HarnessKind harness, bool force, CancellationToken cancellationToken)
         {
-            HarnessKind harness = _Harness;
             if (!HarnessCatalog.SupportsUsage(harness))
             {
                 if (force) Report("Plan usage is available for Claude Code and Codex native logins.");
@@ -455,27 +468,37 @@ namespace Kameo.Desktop
             }
         }
 
-        /// <summary>Launches the current harness's native login with the lowest usage at its tightest limit, checking stale usage first.</summary>
-        internal async Task LaunchLowestAsync(CancellationToken cancellationToken)
+        /// <summary>
+        /// Launches a harness's native login with the lowest usage at its tightest limit, checking stale usage first,
+        /// in the saved launch folder or, with <paramref name="chooseFolder"/>, a folder chosen for this launch.
+        /// </summary>
+        /// <returns>True when a launch started or the folder picker opened; false when a failure was reported in this window.</returns>
+        internal async Task<bool> LaunchLowestAsync(HarnessKind harness, bool chooseFolder, CancellationToken cancellationToken)
         {
-            HarnessKind harness = _Harness;
-            await CheckUsageAsync(false, cancellationToken);
+            await CheckUsageAsync(harness, false, cancellationToken);
             await Task.WhenAll(_PendingUsage.Values.ToArray());
             List<Profile> natives;
             try { natives = _Store.List().Where(profile => profile.Harness == harness && UsageService.Supports(profile)).ToList(); }
-            catch (Microsoft.Data.Sqlite.SqliteException) { Report("The profile database is busy or unavailable. Try again."); return; }
+            catch (Microsoft.Data.Sqlite.SqliteException) { Report("The profile database is busy or unavailable. Try again."); return false; }
             UsageReport? least = UsageService.LeastUsed(natives.Where(profile => _Usage.ContainsKey(profile.Id)).Select(profile => _Usage[profile.Id]));
             Profile? target = least == null ? null : natives.FirstOrDefault(profile => profile.Id == least.ProfileId);
             if (least == null || target == null)
             {
-                Report("No plan usage is available for these logins yet. Make sure they are signed in, then refresh usage.");
-                return;
+                Report("No plan usage is available for these " + HarnessCatalog.Name(harness) + " logins yet. Make sure they are signed in, then refresh usage.");
+                return false;
             }
-            if (RunAction(() => _OpenTerminal(target.Id, false, _Workspace)) && _Status != null)
+            if (chooseFolder)
+            {
+                await ChooseDirectoryAsync(target.Id, cancellationToken);
+                return true;
+            }
+            if (!RunAction(() => _OpenTerminal(target.Id, false, _Workspace))) return false;
+            if (_Status != null)
             {
                 _Status.Text = "Launched " + target.Name + ": " + UsageFormat.Percent(least.PeakPercent) + " used at its tightest limit.";
                 _Status.Foreground = Palette.Accent;
             }
+            return true;
         }
 
         private async Task EditAsync(string? id, CancellationToken cancellationToken)

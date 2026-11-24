@@ -3,10 +3,15 @@ namespace Kameo.Desktop
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using System.Threading;
+    using System.Threading.Tasks;
     using Avalonia.Controls;
     using Kameo.Core;
 
-    /// <summary>Builds the tray icon's native menu: About, management, per-harness launches and selection, and Quit.</summary>
+    /// <summary>
+    /// Builds the tray icon's native menu: About, management, and for each harness a Lowest usage launcher (Claude Code
+    /// and Codex with two or more native logins) and a submenu per profile with Launch, Launch in... and Use as default.
+    /// </summary>
     internal sealed class TrayMenu
     {
         private readonly ProfileStore _Store;
@@ -44,20 +49,29 @@ namespace Kameo.Desktop
             Menu.Add(new NativeMenuItemSeparator());
             foreach (HarnessKind harness in HarnessCatalog.All)
             {
-                Profile? active = profiles.FirstOrDefault(profile => profile.Harness == harness && profile.IsActive);
                 NativeMenu choices = new NativeMenu();
-                NativeMenuItem launch = NativeMenus.Item(active == null ? "No profile selected" : "Launch " + active.Name, () => Launch(harness));
-                launch.IsEnabled = active != null;
-                NativeMenuItem launchIn = NativeMenus.Item("Launch in...", () => LaunchIn(harness));
-                launchIn.IsEnabled = active != null;
-                choices.Add(launch);
-                choices.Add(launchIn);
-                choices.Add(new NativeMenuItemSeparator());
                 List<Profile> harnessProfiles = profiles.Where(profile => profile.Harness == harness).ToList();
+                if (MainWindow.OffersLowestUsage(harness, harnessProfiles))
+                {
+                    choices.Add(NativeMenus.Submenu("Lowest usage",
+                        NativeMenus.Item("Launch", () => _ = LaunchLowestAsync(harness)),
+                        NativeMenus.Item("Launch in...", () => { _Show(); _ = _Window.LaunchLowestAsync(harness, true, CancellationToken.None); })));
+                    choices.Add(new NativeMenuItemSeparator());
+                }
                 foreach (Profile profile in harnessProfiles)
                 {
-                    NativeMenuItem item = new NativeMenuItem(profile.Name) { ToggleType = MenuItemToggleType.Radio, IsChecked = profile.IsActive };
-                    item.Click += (_, _) => Select(profile);
+                    NativeMenuItem use = NativeMenus.Item("Use as default", () => Select(profile));
+                    use.ToggleType = MenuItemToggleType.CheckBox;
+                    use.IsChecked = profile.IsActive;
+                    use.IsEnabled = !profile.IsActive;
+                    NativeMenuItem item = NativeMenus.Submenu(profile.Name,
+                        NativeMenus.Item("Launch", () => Launch(profile.Id)),
+                        NativeMenus.Item("Launch in...", () => LaunchIn(profile.Id)),
+                        new NativeMenuItemSeparator(),
+                        use);
+                    // The tick marks the profile that kameo commands and other launch shortcuts use.
+                    item.ToggleType = MenuItemToggleType.Radio;
+                    item.IsChecked = profile.IsActive;
                     choices.Add(item);
                 }
                 if (harnessProfiles.Count == 0) choices.Add(new NativeMenuItem("No profiles yet") { IsEnabled = false });
@@ -73,17 +87,22 @@ namespace Kameo.Desktop
             _Window.ShowAbout();
         }
 
-        private void Launch(HarnessKind harness)
+        private void Launch(string id)
         {
             // Launch without opening the manager; show it only so a failure message is visible.
-            if (!_Window.LaunchSelected(harness)) _Show();
+            if (!_Window.LaunchProfile(id)) _Show();
         }
 
-        private void LaunchIn(HarnessKind harness)
+        private void LaunchIn(string id)
         {
             // The folder picker belongs to the manager window, so it must be visible first.
             _Show();
-            _Window.LaunchSelectedIn(harness);
+            _Window.LaunchProfileIn(id);
+        }
+
+        private async Task LaunchLowestAsync(HarnessKind harness)
+        {
+            if (!await _Window.LaunchLowestAsync(harness, false, CancellationToken.None)) _Show();
         }
 
         private void Select(Profile profile)
