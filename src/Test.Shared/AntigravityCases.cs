@@ -107,7 +107,19 @@ namespace Test.Shared
                 Fixture.Check(data["environment"]?["GEMINI_API_KEY"] == null && File.ReadAllText(Token(fixture, profile)).Contains("synthetic-refreshed", StringComparison.Ordinal), "Account tokens were not retained.");
                 if (!OperatingSystem.IsWindows()) Fixture.Check(File.GetUnixFileMode(Token(fixture, profile)) == (UnixFileMode.UserRead | UnixFileMode.UserWrite), "Token file permissions were not tightened.");
             });
-            foreach (string version in new[] { "1.5.6", "1.5.8", "2.0.0", "fail", "synthetic-secret-version-output", new string('x', 5000) })
+            foreach (string version in new[] { "1.5.8", "1.5.16", "1.5.123" })
+            {
+                AddAsync("LaterPatchStartsAccountSession_" + version.Replace('.', '_'), async (fixture, cancellationToken) =>
+                {
+                    Profile profile = Account(fixture);
+                    File.WriteAllText(Path.Combine(fixture.Root, "probe-version.txt"), version);
+                    string capture = Path.Combine(fixture.Root, "later.json");
+                    int exit = await new LaunchService(fixture.Store).RunAsync(profile.Id, new[] { "--capture", capture, "--fixture-token", "synthetic-refreshed", "--exit", "5" }, true, cancellationToken).ConfigureAwait(false);
+                    Fixture.Check(exit == 5 && File.Exists(capture), "A verified later 1.5.x patch did not start an account session.");
+                    Fixture.Check(File.ReadAllText(Token(fixture, profile)).Contains("synthetic-refreshed", StringComparison.Ordinal), "Account tokens were not retained for a later patch.");
+                });
+            }
+            foreach (string version in new[] { "1.5.6", "1.4.7", "2.0.0", "fail", "synthetic-secret-version-output", new string('x', 5000) })
             {
                 string label = version.Length > 40 ? "Oversized" : version.Replace('.', '_');
                 AddAsync("UnverifiedVersionRejected_" + label, async (fixture, cancellationToken) =>

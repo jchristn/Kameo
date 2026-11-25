@@ -3,6 +3,7 @@ namespace Kameo.Core
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
+    using System.Globalization;
     using System.IO;
     using System.Text;
     using System.Threading;
@@ -11,10 +12,21 @@ namespace Kameo.Core
     /// <summary>Gates native account launches on the CLI version whose file-storage behavior was verified.</summary>
     public static class AntigravityCompatibility
     {
-        /// <summary>The CLI version verified for account isolation.</summary>
+        /// <summary>The earliest CLI version verified for account isolation. Later 1.5.x patch releases are accepted.</summary>
         public const string SupportedVersion = "1.5.7";
         private const string _Message = "Google account profiles require Antigravity CLI " + SupportedVersion
-            + ". This executable did not report the verified version. Set the profile executable to that agy binary, or update Kameo for newer CLI support. No account session was started.";
+            + " or a later 1.5.x release. This executable did not report a verified version. Set the profile executable to a supported agy binary, or update Kameo for newer CLI support. No account session was started.";
+
+        /// <summary>Whether a reported version is a verified release: the 1.5 line at patch 7 or later.</summary>
+        public static bool IsSupported(string version)
+        {
+            ArgumentNullException.ThrowIfNull(version);
+            string[] parts = version.Trim().Split('.');
+            return parts.Length == 3
+                && int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int major) && major == 1
+                && int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int minor) && minor == 5
+                && int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out int patch) && patch >= 7;
+        }
 
         /// <summary>Runs a bounded version probe using the profile's isolated environment, with a five-second timeout.</summary>
         public static async Task VerifyAsync(ProcessStartInfo configured, string directory, CancellationToken cancellationToken)
@@ -39,7 +51,7 @@ namespace Kameo.Core
                 Task<string> output = ReadBoundedAsync(process.StandardOutput, timeout.Token);
                 Task<string> error = ReadBoundedAsync(process.StandardError, timeout.Token);
                 await Task.WhenAll(output, error, process.WaitForExitAsync(timeout.Token)).ConfigureAwait(false);
-                if (process.ExitCode != 0 || (await output.ConfigureAwait(false)).Trim() != SupportedVersion)
+                if (process.ExitCode != 0 || !IsSupported(await output.ConfigureAwait(false)))
                     throw new InvalidOperationException(_Message);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

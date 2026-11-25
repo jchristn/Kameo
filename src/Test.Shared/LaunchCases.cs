@@ -145,6 +145,17 @@ namespace Test.Shared
             Add("ClaudeSettingsOverrideRejected", fixture => Fixture.Throws<ArgumentException>(() => new LaunchService(fixture.Store).Prepare(fixture.Add(HarnessKind.Claude), new[] { "--settings", "outside.json" })));
             Add("MissingExecutableActionable", fixture => Fixture.Throws<FileNotFoundException>(() => ExecutableResolver.Resolve(new ProcessStartInfo(Path.Combine(fixture.Root, "missing-executable")))));
             Add("UnknownBatchLauncherRejected", fixture => { string path = Path.Combine(fixture.Root, "unsafe.cmd"); File.WriteAllText(path, "@echo off\r\necho %*\r\n"); Fixture.Throws<InvalidOperationException>(() => ExecutableResolver.Resolve(new ProcessStartInfo(path))); });
+            Add("NpmShimProbeLineIsNotTheTarget", fixture =>
+            {
+                // Modern npm .cmd shims test for a bundled node before the exec line. When node.exe exists beside the
+                // shim the resolver must still select the exec target, not the probe, or the harness runs as node.exe.
+                string directory = Path.Combine(fixture.Root, "shim"); Directory.CreateDirectory(directory);
+                File.WriteAllText(Path.Combine(directory, "node.exe"), "");
+                string target = Path.Combine(directory, "harness.exe"); File.WriteAllText(target, "");
+                string shim = Path.Combine(directory, "harness.cmd");
+                File.WriteAllText(shim, "@ECHO off\r\nIF EXIST \"%~dp0\\node.exe\" (\r\n  SET \"_prog=%~dp0\\node.exe\"\r\n)\r\n\"%~dp0\\harness.exe\"   %*\r\n");
+                Fixture.Check(ExecutableResolver.Resolve(new ProcessStartInfo(shim)).FileName == target, "The npm shim resolved to its node.exe probe instead of the exec target.");
+            });
             cases.Add(KameoSuites.Case("Launch", "FailedStartReleasesLease", async (fixture, cancellationToken) =>
             {
                 Profile profile = fixture.Add(); profile.Executable = Path.Combine(fixture.Root, "does-not-exist"); fixture.Store.Update(profile);

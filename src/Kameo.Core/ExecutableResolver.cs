@@ -1,6 +1,7 @@
 namespace Kameo.Core
 {
     using System;
+    using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
     using System.Text.RegularExpressions;
@@ -41,18 +42,36 @@ namespace Kameo.Core
             // On Windows the npm global bin holds both a .cmd shim and an extensionless sh script; the sh script is not a
             // runnable PE. Probe real Windows extensions first so a bare "claude" resolves to claude.cmd, not the sh file.
             string[] extensions = OperatingSystem.IsWindows() ? new[] { ".exe", ".cmd", ".bat", "" } : new[] { "" };
-            foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            foreach (string directory in SearchDirectories())
                 foreach (string extension in extensions)
                 {
-                    string path = Path.Combine(directory.Trim('"'), command + extension);
+                    string path = Path.Combine(directory, command + extension);
                     if (File.Exists(path)) return path;
                 }
             return null;
         }
 
-        // Matches both the classic npm batch shim ("node ... %~dp0\entry.js") and newer shims that invoke a sibling .exe
-        // ("%dp0%\node_modules\...\claude.exe"). Resolve() routes .js/.cjs/.mjs through node and uses .exe directly.
-        [GeneratedRegex("\"%~?dp0%?[\\\\/]?([^\"]+\\.(?:exe|js|cjs|mjs))\"", RegexOptions.IgnoreCase)]
+        // Yields the process PATH directories first, then on Windows the persisted user and machine PATH. A desktop
+        // session launched before an installer appended to PATH keeps a stale process copy, so a harness the user can
+        // already run from a new terminal is still resolved. Each directory is visited once, in order.
+        private static IEnumerable<string> SearchDirectories()
+        {
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string?[] sources = OperatingSystem.IsWindows()
+                ? new[] { Environment.GetEnvironmentVariable("PATH"), Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User), Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) }
+                : new[] { Environment.GetEnvironmentVariable("PATH") };
+            foreach (string? source in sources)
+                foreach (string directory in (source ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    string trimmed = directory.Trim('"');
+                    if (trimmed.Length > 0 && seen.Add(trimmed)) yield return trimmed;
+                }
+        }
+
+        // Matches the shim's real invocation: a %dp0%-rooted .exe/.js target immediately before the "%*" argument
+        // forwarder. Anchoring on "%*" skips the "IF EXIST \"%dp0%\node.exe\"" probe that modern npm .cmd shims emit
+        // first, which would otherwise resolve the harness to node.exe. Resolve() routes .js/.cjs/.mjs through node.
+        [GeneratedRegex("\"%~?dp0%?[\\\\/]?([^\"]+\\.(?:exe|js|cjs|mjs))\"\\s*%\\*", RegexOptions.IgnoreCase)]
         private static partial Regex NpmScript();
     }
 }
