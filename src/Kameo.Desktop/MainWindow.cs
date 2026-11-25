@@ -2,6 +2,7 @@ namespace Kameo.Desktop
 {
     using System;
     using System.Collections.Generic;
+    using System.Globalization;
     using System.IO;
     using System.Linq;
     using System.Reflection;
@@ -14,6 +15,7 @@ namespace Kameo.Desktop
     using Avalonia.Media;
     using Avalonia.Media.Imaging;
     using Avalonia.Platform.Storage;
+    using Avalonia.Threading;
     using Kameo.Core;
 
     /// <summary>The profile manager, organized by harness with explicit selection and launch actions.</summary>
@@ -32,6 +34,16 @@ namespace Kameo.Desktop
 
         /// <summary>How long a usage result is reused before navigation checks that login again.</summary>
         internal static readonly TimeSpan UsageCacheDuration = TimeSpan.FromMinutes(15);
+
+        /// <summary>How often usage for every harness's native logins is refreshed in the background.</summary>
+        internal static readonly TimeSpan UsageRefreshInterval = UsageCacheDuration;
+
+        /// <summary>
+        /// A background refresh rechecks logins at least this old, so a check that finished a moment after the
+        /// previous tick is not skipped until the tick after.
+        /// </summary>
+        private static readonly TimeSpan _BackgroundRefreshAge = UsageRefreshInterval - TimeSpan.FromMinutes(1);
+        private readonly DispatcherTimer _UsageTimer;
         private HarnessKind _Harness = HarnessKind.Claude;
         private TextBox? _Search;
         private StackPanel? _Profiles;
@@ -65,6 +77,11 @@ namespace Kameo.Desktop
                 Icon = new WindowIcon(icon);
             Closed += (_, _) => _Logo?.Dispose();
             Opened += (_, _) => _ = CheckUsageAsync(false, CancellationToken.None);
+            // Runs while the window is hidden in the tray too, so usage is current and expired sign-ins surface early.
+            _UsageTimer = new DispatcherTimer { Interval = UsageRefreshInterval };
+            _UsageTimer.Tick += (_, _) => _ = RefreshUsageInBackgroundAsync(CancellationToken.None);
+            _UsageTimer.Start();
+            Closed += (_, _) => _UsageTimer.Stop();
             InstallNativeMenus();
             Refresh();
         }
@@ -279,7 +296,7 @@ namespace Kameo.Desktop
             Grid.SetRow(navigation, 1); panel.Children.Add(navigation);
             StackPanel bottom = Ui.Stack(
                 Ui.Button("Appearance...", ShowAppearance),
-                Ui.Text("v0.1.1 · alpha", 10, Palette.Muted));
+                Ui.Text("v0.1.2 · alpha", 10, Palette.Muted));
             Grid.SetRow(bottom, 2); panel.Children.Add(bottom);
             return new Border { Background = Palette.Sidebar, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 0, 1, 0), Child = panel };
         }
@@ -407,7 +424,23 @@ namespace Kameo.Desktop
         internal Task CheckUsageAsync(bool force, CancellationToken cancellationToken) => CheckUsageAsync(_Harness, force, cancellationToken);
 
         /// <summary>Checks plan usage for a harness's native logins, whether or not that harness is on screen.</summary>
-        internal async Task CheckUsageAsync(HarnessKind harness, bool force, CancellationToken cancellationToken)
+        internal Task CheckUsageAsync(HarnessKind harness, bool force, CancellationToken cancellationToken) =>
+            CheckUsageAsync(harness, force ? TimeSpan.Zero : UsageCacheDuration, force, cancellationToken);
+
+        /// <summary>Whether the periodic background usage refresh is running.</summary>
+        internal bool RefreshesUsageInBackground => _UsageTimer.IsEnabled && _UsageTimer.Interval == UsageRefreshInterval;
+
+        /// <summary>
+        /// Refreshes usage for every harness that reports it, on screen or not, without reporting configuration
+        /// problems. Runs every <see cref="UsageRefreshInterval"/>.
+        /// </summary>
+        internal async Task RefreshUsageInBackgroundAsync(CancellationToken cancellationToken)
+        {
+            foreach (HarnessKind harness in HarnessCatalog.All.Where(HarnessCatalog.SupportsUsage))
+                await CheckUsageAsync(harness, _BackgroundRefreshAge, false, cancellationToken);
+        }
+
+        private async Task CheckUsageAsync(HarnessKind harness, TimeSpan maxAge, bool force, CancellationToken cancellationToken)
         {
             if (!HarnessCatalog.SupportsUsage(harness))
             {
@@ -419,7 +452,7 @@ namespace Kameo.Desktop
             catch (Microsoft.Data.Sqlite.SqliteException) { if (force) Report("The profile database is busy or unavailable. Try again."); return; }
             DateTimeOffset now = _Clock.GetUtcNow();
             List<Profile> due = natives.Where(profile => !_PendingUsage.ContainsKey(profile.Id)
-                && (force || !_UsageCheckedAt.TryGetValue(profile.Id, out DateTimeOffset checkedAt) || now - checkedAt >= UsageCacheDuration)).ToList();
+                && (!_UsageCheckedAt.TryGetValue(profile.Id, out DateTimeOffset checkedAt) || now - checkedAt >= maxAge)).ToList();
             if (due.Count == 0)
             {
                 if (force && natives.Count == 0) Report("Add a native login to see plan usage. API keys have no plan limits.");
@@ -442,10 +475,15 @@ namespace Kameo.Desktop
             try { await Task.WhenAll(checks); }
             finally
             {
-                Refresh();
-                if (_Status != null && _Harness == harness) { _Status.Text = HarnessCatalog.Name(harness) + " usage checked."; _Status.Foreground = Palette.Accent; }
+                // Rebuilding for a harness that is not on screen would reset the visible harness's status line.
+                if (_Harness == harness) Refresh();
+                if (_Status != null && _Harness == harness) { _Status.Text = UsageCheckedMessage(harness, _Clock.GetLocalNow()); _Status.Foreground = Palette.Accent; }
             }
         }
+
+        /// <summary>The status shown after a harness's usage is checked, with the local time of the check.</summary>
+        internal static string UsageCheckedMessage(HarnessKind harness, DateTimeOffset localTime) =>
+            HarnessCatalog.Name(harness) + " usage checked at " + localTime.ToString("t", CultureInfo.CurrentCulture) + ".";
 
         private async Task ReadUsageAsync(Profile profile, SemaphoreSlim gate, CancellationToken cancellationToken)
         {

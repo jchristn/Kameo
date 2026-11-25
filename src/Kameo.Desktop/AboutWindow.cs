@@ -28,7 +28,7 @@ namespace Kameo.Desktop
             Image mark = new Image { Name = "ProductLogo", Source = _Logo, Width = 128, Height = 128, HorizontalAlignment = HorizontalAlignment.Center };
             TextBlock name = Ui.Text("Kameo", 30, weight: FontWeight.SemiBold);
             name.HorizontalAlignment = HorizontalAlignment.Center;
-            Border version = Ui.Badge("0.1.1  ·  ALPHA", true);
+            Border version = Ui.Badge("0.1.2  ·  ALPHA", true);
             version.HorizontalAlignment = HorizontalAlignment.Center;
             HyperlinkButton repository = new HyperlinkButton
             {

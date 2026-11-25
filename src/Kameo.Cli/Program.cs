@@ -44,7 +44,7 @@ namespace Kameo.Cli
         private static async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken)
         {
             if (args.Length == 0 || args[0] is "help" or "--help" or "-h") { Help(); return 0; }
-            if (args[0] == "--version") { Console.WriteLine("Kameo 0.1.1 (alpha)"); return 0; }
+            if (args[0] == "--version") { Console.WriteLine("Kameo 0.1.2 (alpha)"); return 0; }
             string? root = null;
             if (args[0] == "--home") { Require(args, 3); root = args[1]; args = args[2..]; }
             ProfileStore store = new ProfileStore(root);
@@ -188,7 +188,7 @@ namespace Kameo.Cli
             return args[index + 1];
         }
         private static void Help() => Console.WriteLine("""
-            Kameo 0.1.1 (alpha) - switch identities, keep your workflow.
+            Kameo 0.1.2 (alpha) - switch identities, keep your workflow.
 
             kameo [--home PATH] COMMAND
               list                                     List profiles (* = selected)

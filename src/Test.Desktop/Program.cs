@@ -432,7 +432,8 @@ namespace Test.Desktop
                     Check(checkedIds.OrderBy(id => id, StringComparer.Ordinal).SequenceEqual(new[] { work.Id, personal.Id }.OrderBy(id => id, StringComparer.Ordinal)), "Navigation should check each native login once.");
                     Check(text.Contains("5-hour", StringComparison.Ordinal) && text.Contains("42% used · resets in", StringComparison.Ordinal) && text.Contains("95% used", StringComparison.Ordinal)
                         && text.Contains("Pro · Credits 2,500 · Live, ", StringComparison.Ordinal), "Usage windows or plan summary are missing.");
-                    Check(text.Contains("The saved sign-in has expired.", StringComparison.Ordinal) && text.Contains("Codex usage checked.", StringComparison.Ordinal), "Failure messages or completion status are missing.");
+                    Check(text.Contains("The saved sign-in has expired.", StringComparison.Ordinal) && text.Contains(MainWindow.UsageCheckedMessage(HarnessKind.Codex, clock.GetLocalNow()), StringComparison.Ordinal), "Failure messages or completion status are missing.");
+                    Check(MainWindow.UsageCheckedMessage(HarnessKind.Codex, clock.GetLocalNow()).StartsWith("Codex usage checked at ", StringComparison.Ordinal), "The completion status should include the local check time.");
                     ProgressBar[] bars = window.GetVisualDescendants().OfType<ProgressBar>().ToArray();
                     Check(bars.Length == 2 && bars[0].Value == 42 && bars[1].Value == 95, "Usage bars are wrong.");
                     Navigate(window, "Claude Code"); Navigate(window, "Codex");
@@ -452,6 +453,41 @@ namespace Test.Desktop
                     Check(Text(window).Contains("Plan usage is available for Claude Code and Codex", StringComparison.Ordinal) && checkedIds.Count == 8, "The menu should explain unsupported harnesses without checking.");
                 }
                 finally { window.Close(); }
+            });
+            AddAsync("UsageRefreshesInBackgroundForEveryHarness", async (_, store, cancellationToken) =>
+            {
+                Profile claude = store.Create(new Profile { Harness = HarnessKind.Claude, Kind = CredentialKind.Native, Name = "Claude Work" });
+                Profile codex = store.Create(new Profile { Harness = HarnessKind.Codex, Kind = CredentialKind.Native, Name = "Codex Work" });
+                store.Create(new Profile { Harness = HarnessKind.Antigravity, Kind = CredentialKind.Native, Name = "Google Work" });
+                List<string> checkedIds = new List<string>();
+                TestClock clock = new TestClock();
+                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root), (id, login, directory) => { }, (id, token) =>
+                {
+                    checkedIds.Add(id);
+                    return Task.FromResult(new UsageReport { ProfileId = id, Harness = id == claude.Id ? HarnessKind.Claude : HarnessKind.Codex, Status = UsageStatus.Expired, Message = "The saved sign-in has expired." });
+                }, clock);
+                try
+                {
+                    Check(MainWindow.UsageRefreshInterval == TimeSpan.FromMinutes(15) && MainWindow.UsageRefreshInterval == MainWindow.UsageCacheDuration, "Background refresh should match the 15-minute usage cache.");
+                    Check(window.RefreshesUsageInBackground, "The background usage refresh should start with the window, even before it is shown.");
+                    window.Show(); Sync(window);
+                    await Task.Delay(20, cancellationToken);
+                    Check(checkedIds.SequenceEqual(new[] { claude.Id }), "Opening should check only the harness on screen.");
+                    await window.RefreshUsageInBackgroundAsync(cancellationToken);
+                    Check(checkedIds.SequenceEqual(new[] { claude.Id, codex.Id }), "A background refresh should check stale logins for every usage harness without navigation.");
+                    clock.Now += TimeSpan.FromMinutes(5);
+                    await window.RefreshUsageInBackgroundAsync(cancellationToken);
+                    Check(checkedIds.Count == 2, "A background refresh should not recheck logins checked moments ago.");
+                    clock.Now += TimeSpan.FromMinutes(10);
+                    await window.RefreshUsageInBackgroundAsync(cancellationToken);
+                    Check(checkedIds.Count == 4, "The next 15-minute refresh should recheck every login.");
+                    Check(Text(window).Contains(MainWindow.UsageCheckedMessage(HarnessKind.Claude, clock.GetLocalNow()), StringComparison.Ordinal)
+                        && Text(window).Contains("The saved sign-in has expired.", StringComparison.Ordinal), "A background refresh should surface expired sign-ins and the check time.");
+                    Navigate(window, "Codex");
+                    Check(checkedIds.Count == 4 && Text(window).Contains("The saved sign-in has expired.", StringComparison.Ordinal), "Navigating after a background refresh should use its results.");
+                }
+                finally { window.Close(); }
+                Check(!window.RefreshesUsageInBackground, "Closing the window should stop the background usage refresh.");
             });
             AddAsync("LaunchLowestUsageChoosesMostHeadroom", async (_, store, cancellationToken) =>
             {

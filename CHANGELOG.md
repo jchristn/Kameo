@@ -4,6 +4,13 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-25
+
+Alpha. Automatic usage refresh.
+
+- The desktop refreshes plan usage for every Claude Code and Codex native login in the background every 15 minutes, matching the usage cache, including while the window is hidden in the tray. Usage is current when you return, and a login that needs to sign in again shows up without clicking **Refresh usage**.
+- The usage status line now reads "{harness} usage checked at {time}" in local time.
+
 ## [0.1.1] - 2026-11-24
 
 Alpha. Windows sign-in fixes.

@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/logo-dark.png" width="240" alt="Kameo chameleon logo" /></p>
 
-<p align="center"><strong>v0.1.1 · Alpha</strong></p>
+<p align="center"><strong>v0.1.2 · Alpha</strong></p>
 
 # Kameo
 
@@ -15,7 +15,7 @@ Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. I
 - Import existing native credential files without modifying the originals.
 - Independent selections for Claude Code, Codex, Antigravity, and Mux.
 - Shared Mux endpoints files: choose one JSON file for multiple profiles and pick up source changes at the next launch.
-- Plan usage for Claude Code and Codex native logins: each login's 5-hour, weekly, and model limits with reset times, checked when you open the harness and reused for 15 minutes. **Launch lowest usage** starts the login with the most headroom, and `kameo usage` prints the same in a terminal or as JSON.
+- Plan usage for Claude Code and Codex native logins: each login's 5-hour, weekly, and model limits with reset times, checked when you open the harness and refreshed automatically every 15 minutes. **Launch lowest usage** starts the login with the most headroom, and `kameo usage` prints the same in a terminal or as JSON.
 - A tray menu with a submenu per profile (**Launch**, **Launch in...**, **Use as default**), **Lowest usage** for Claude Code and Codex, and About, plus search, launch-folder selection, and a compact desktop manager.
 - 16 palettes with coordinated light and dark backgrounds, panels, and accents: Fern, Ocean, Iris, Amber, Rose, Graphite, Seafoam, Lagoon, Cobalt, Lavender, Coral, Sand, Espresso, Midnight, Paper, and Nord.
 - Native macOS application menus, including About, Edit, Profiles, View, Window, and Quit. Profiles submenus launch the selected account in your saved folder or a folder chosen for that session.
@@ -182,7 +182,7 @@ For future terminals, add `~/.dotnet/tools` to your shell's `PATH`, or `%USERPRO
 
 You can now change to any project directory and run `kameo list`, `kameo codex`, or another harness command. The global CLI uses the same `~/.kameo/` profiles as the desktop, or the directory selected by `KAMEO_HOME`. It runs independently of the clone after installation.
 
-To install a rebuilt copy, run the following from the clone's root. During the alpha, builds retain version `0.1.1`, so uninstall and reinstall to replace that version rather than relying on a version-based update:
+To install a rebuilt copy, run the following from the clone's root. During the alpha, builds retain version `0.1.2`, so uninstall and reinstall to replace that version rather than relying on a version-based update:
 
 ```sh
 dotnet pack src/Kameo.Cli/Kameo.Cli.csproj -c Release -o artifacts/packages
@@ -269,7 +269,7 @@ The desktop provides the same fields. Mux's current source has no separate subsc
 
 ### Check plan usage
 
-Each Claude Code or Codex native login has its own subscription limits. In the desktop, open Claude Code or Codex: Kameo checks each native login and shows its windows, such as 5-hour and weekly, with a bar, the percentage used, and when the window resets. Results are reused for 15 minutes, so switching between harnesses does not check again; **Refresh usage** (or **View > Refresh Usage**, ⌘U on macOS) checks now. **Launch lowest usage** opens the login whose tightest limit has the lowest percentage used, refreshing stale results first, in your launch folder. In a terminal:
+Each Claude Code or Codex native login has its own subscription limits. In the desktop, open Claude Code or Codex: Kameo checks each native login and shows its windows, such as 5-hour and weekly, with a bar, the percentage used, and when the window resets. Results are reused for 15 minutes, so switching between harnesses does not check again, and Kameo refreshes every native login in the background every 15 minutes, even while hidden in the tray, so usage is current when you return and an expired sign-in shows up without a manual refresh. The status line shows when usage was last checked; **Refresh usage** (or **View > Refresh Usage**, ⌘U on macOS) checks now. **Launch lowest usage** opens the login whose tightest limit has the lowest percentage used, refreshing stale results first, in your launch folder. In a terminal:
 
 ```sh
 kameo usage                 # every Claude Code and Codex login
