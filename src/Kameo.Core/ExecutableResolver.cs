@@ -19,7 +19,7 @@ namespace Kameo.Core
                 Match match = NpmScript().Match(File.ReadAllText(resolved));
                 if (!match.Success) throw new InvalidOperationException("This batch launcher is not an npm shim. Set the profile executable to its .exe or JavaScript entry point.");
                 resolved = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(resolved)!, match.Groups[1].Value));
-                if (!File.Exists(resolved)) throw new FileNotFoundException("The npm launcher's JavaScript entry point is missing.");
+                if (!File.Exists(resolved)) throw new FileNotFoundException("The npm launcher's target executable is missing.");
                 extension = Path.GetExtension(resolved);
             }
             if (extension is ".js" or ".cjs" or ".mjs")
@@ -38,7 +38,9 @@ namespace Kameo.Core
             if (Path.IsPathRooted(command)) return File.Exists(command) ? command : null;
             if (command.Contains(Path.DirectorySeparatorChar) || command.Contains(Path.AltDirectorySeparatorChar))
                 return File.Exists(command) ? Path.GetFullPath(command) : null;
-            string[] extensions = OperatingSystem.IsWindows() ? new[] { "", ".exe", ".cmd", ".bat" } : new[] { "" };
+            // On Windows the npm global bin holds both a .cmd shim and an extensionless sh script; the sh script is not a
+            // runnable PE. Probe real Windows extensions first so a bare "claude" resolves to claude.cmd, not the sh file.
+            string[] extensions = OperatingSystem.IsWindows() ? new[] { ".exe", ".cmd", ".bat", "" } : new[] { "" };
             foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
                 foreach (string extension in extensions)
                 {
@@ -48,7 +50,9 @@ namespace Kameo.Core
             return null;
         }
 
-        [GeneratedRegex("\"%~?dp0%?[\\\\/]([^\"]+\\.(?:js|cjs|mjs))\"", RegexOptions.IgnoreCase)]
+        // Matches both the classic npm batch shim ("node ... %~dp0\entry.js") and newer shims that invoke a sibling .exe
+        // ("%dp0%\node_modules\...\claude.exe"). Resolve() routes .js/.cjs/.mjs through node and uses .exe directly.
+        [GeneratedRegex("\"%~?dp0%?[\\\\/]?([^\"]+\\.(?:exe|js|cjs|mjs))\"", RegexOptions.IgnoreCase)]
         private static partial Regex NpmScript();
     }
 }

@@ -61,6 +61,8 @@ namespace Kameo.Desktop
             Title = "Kameo";
             Width = 800; Height = 550; MinWidth = 700; MinHeight = 440;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            using (Stream icon = Assembly.GetExecutingAssembly().GetManifestResourceStream("Kameo.Logo")!)
+                Icon = new WindowIcon(icon);
             Closed += (_, _) => _Logo?.Dispose();
             Opened += (_, _) => _ = CheckUsageAsync(false, CancellationToken.None);
             InstallNativeMenus();

@@ -3,6 +3,7 @@ namespace Kameo.Desktop
     using System;
     using System.Diagnostics;
     using System.IO;
+    using System.Text;
     using Kameo.Core;
 
     internal static class TerminalLauncher
@@ -13,8 +14,24 @@ namespace Kameo.Desktop
             string[] args = { "--home", store.Root, login ? "login" : "run-profile", id };
             if (OperatingSystem.IsWindows())
             {
-                ProcessStartInfo info = new ProcessStartInfo(cli) { UseShellExecute = true, WorkingDirectory = workingDirectory };
-                foreach (string argument in args) info.ArgumentList.Add(argument);
+                string directory = Path.Combine(store.Root, "launchers");
+                PrivateFiles.DirectoryCreate(directory);
+                string script = Path.Combine(directory, id + ".cmd");
+                StringBuilder command = new StringBuilder();
+                command.Append(QuoteWindows(cli));
+                foreach (string argument in args) command.Append(' ').Append(QuoteWindows(argument));
+                StringBuilder body = new StringBuilder();
+                body.Append("@echo off\r\n");
+                body.Append("cd /d ").Append(QuoteWindows(workingDirectory)).Append("\r\n");
+                body.Append(command).Append("\r\n");
+                body.Append("set STATUS=%ERRORLEVEL%\r\n");
+                body.Append("echo.\r\n");
+                body.Append("echo Session ended ^(exit %STATUS%^). Press any key to close.\r\n");
+                body.Append("pause >nul\r\n");
+                body.Append("exit /b %STATUS%\r\n");
+                PrivateFiles.Write(script, body.ToString());
+                // ShellExecute on a .cmd allocates a fresh console so the user can see output and respond to interactive prompts.
+                ProcessStartInfo info = new ProcessStartInfo(script) { UseShellExecute = true, WorkingDirectory = workingDirectory };
                 Process.Start(info)?.Dispose();
             }
             else if (OperatingSystem.IsMacOS())
@@ -43,6 +60,7 @@ namespace Kameo.Desktop
         }
 
         private static string Quote(string text) => "'" + text.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+        private static string QuoteWindows(string text) => "\"" + text.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
         private static string FindCli()
         {
             string filename = OperatingSystem.IsWindows() ? "kameo.exe" : "kameo";

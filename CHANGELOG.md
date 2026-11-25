@@ -4,6 +4,10 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 ## [Unreleased]
 
+- Windows: show the Kameo logo in the main window's taskbar entry and title bar.
+- Windows: Sign in and Launch now open through a `.cmd` launcher that keeps the console open after the session ends, matching the macOS behaviour. Errors are no longer flashed away before you can read them.
+- Windows: resolve harness executables by probing `.exe`, `.cmd`, and `.bat` before the extensionless filename, so npm global bins (where `claude` is an sh script and `claude.cmd` is the real shim) launch correctly. The npm-shim parser also accepts shims that invoke a sibling `.exe`, which is how current Claude Code is packaged.
+
 ## [0.1.0] - 2026-11-20
 
 Alpha. Initial release.
