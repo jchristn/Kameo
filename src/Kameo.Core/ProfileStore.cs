@@ -228,7 +228,7 @@ namespace Kameo.Core
             {
                 return OpenLease(path, share);
             }
-            catch (IOException) { throw new InvalidOperationException("This profile is in use. Close its running harness or login session and try again."); }
+            catch (IOException) { throw new InvalidOperationException("This profile is in use. Close sessions for this profile and try again. Sessions for other profiles can stay open."); }
         }
 
         private static FileStream OpenLease(string path, FileShare share)

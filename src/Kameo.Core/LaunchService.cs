@@ -5,6 +5,7 @@ namespace Kameo.Core
     using System.Diagnostics;
     using System.IO;
     using System.Linq;
+    using System.Net.Mail;
     using System.Text.Json.Nodes;
     using System.Threading;
     using System.Threading.Tasks;
@@ -16,6 +17,9 @@ namespace Kameo.Core
         private static readonly string[] _CredentialVariables =
         {
             "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS",
+            "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_PROFILE", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID",
+            "ANTHROPIC_IDENTITY_TOKEN", "ANTHROPIC_IDENTITY_TOKEN_FILE", "CLAUDE_CODE_FEDERATION_CACHE_DIR",
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR",
             "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
             "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CONFIG_DIR",
             "OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY", "CODEX_HOME", "CODEX_ACCESS_TOKEN",
@@ -53,8 +57,20 @@ namespace Kameo.Core
             {
                 case HarnessKind.Claude:
                     start.Environment["CLAUDE_CONFIG_DIR"] = directory;
+                    // Credential storage can be overridden independently of Claude's config directory.
+                    start.Environment["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = directory;
+                    start.Environment["ANTHROPIC_CONFIG_DIR"] = Path.Combine(directory, "anthropic");
                     if (profile.Kind == CredentialKind.ApiKey) start.Environment["ANTHROPIC_API_KEY"] = profile.ApiKey;
-                    if (login) { start.ArgumentList.Add("auth"); start.ArgumentList.Add("login"); }
+                    if (login)
+                    {
+                        start.ArgumentList.Add("auth"); start.ArgumentList.Add("login");
+                        if (!arguments.Any(argument => argument == "--email" || argument.StartsWith("--email=", StringComparison.Ordinal))
+                            && MailAddress.TryCreate(profile.Name, out MailAddress? address)
+                            && string.Equals(address.Address, profile.Name, StringComparison.Ordinal))
+                        {
+                            start.ArgumentList.Add("--email"); start.ArgumentList.Add(profile.Name);
+                        }
+                    }
                     break;
                 case HarnessKind.Codex:
                     start.Environment["CODEX_HOME"] = directory;

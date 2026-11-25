@@ -27,7 +27,13 @@ namespace Test.Harness
             JsonObject environment = new JsonObject();
             foreach (string name in new[] { "KAMEO_PROFILE_ID", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "GEMINI_CLI_HOME", "MUX_CONFIG_DIR", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "KAMEO_MUX_API_KEY", "SSH_CONNECTION", "AGY_CLI_DISABLE_AUTO_UPDATE" })
                 environment[name] = Environment.GetEnvironmentVariable(name);
+            foreach (string name in new[] { "CLAUDE_SECURESTORAGE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR" })
+                environment[name] = Environment.GetEnvironmentVariable(name);
+            bool hasClaudeOverride = false;
+            foreach (string name in new[] { "ANTHROPIC_PROFILE", "ANTHROPIC_FEDERATION_RULE_ID", "ANTHROPIC_ORGANIZATION_ID", "ANTHROPIC_IDENTITY_TOKEN", "ANTHROPIC_IDENTITY_TOKEN_FILE", "CLAUDE_CODE_FEDERATION_CACHE_DIR" })
+                hasClaudeOverride |= Environment.GetEnvironmentVariable(name) != null;
             JsonObject result = new JsonObject { ["arguments"] = arguments, ["environment"] = environment, ["cwd"] = Environment.CurrentDirectory };
+            result["hasClaudeCredentialOverride"] = hasClaudeOverride;
             string capturePath = args[capture + 1];
             await File.WriteAllTextAsync(capturePath + ".tmp", result.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
             File.Move(capturePath + ".tmp", capturePath);

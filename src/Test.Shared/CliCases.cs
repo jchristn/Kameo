@@ -1,6 +1,7 @@
 namespace Test.Shared
 {
     using System;
+    using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
     using System.Threading;
@@ -93,9 +94,12 @@ namespace Test.Shared
             })
         });
 
-        internal static async Task<CliResult> RunAsync(Fixture fixture, string[] arguments, string? input, CancellationToken cancellationToken)
+        internal static async Task<CliResult> RunAsync(Fixture fixture, string[] arguments, string? input, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? environment = null)
         {
             using Process process = new Process { StartInfo = new ProcessStartInfo(Fixture.Cli()) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true } };
+            process.StartInfo.Environment["KAMEO_HOME"] = fixture.Root;
+            if (environment != null)
+                foreach (KeyValuePair<string, string> entry in environment) process.StartInfo.Environment[entry.Key] = entry.Value;
             process.StartInfo.ArgumentList.Add("--home"); process.StartInfo.ArgumentList.Add(fixture.Root);
             foreach (string argument in arguments) process.StartInfo.ArgumentList.Add(argument);
             process.Start();

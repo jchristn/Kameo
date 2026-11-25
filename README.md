@@ -142,6 +142,12 @@ Remove any Kameo `PATH` entries, aliases, shortcuts, or symlinks you added manua
 
 The executable field accepts an executable name, absolute native executable path, or JavaScript entry point. On Windows, standard npm `.cmd` shims are resolved to their JavaScript entry points and launched with Node.js. Arbitrary batch files are rejected, so harness arguments never pass through `cmd.exe` inside Kameo.
 
+## Concurrent accounts
+
+Claude Code, Codex, Antigravity, and Mux can run multiple profiles at the same time. Create a separate profile for each account or API key, then click **Launch** on each profile's card. Each process keeps its own profile directory and credentials; changing the default profile affects future launches only.
+
+Sign-in/setup, credential import, editing, and deletion require only the affected profile to be idle. Sessions for other profiles and providers can stay open while you authenticate or repair that profile. For browser sign-in, confirm the intended account before authorizing; Kameo does not isolate browser cookies.
+
 ## Launch from a terminal
 
 The platform's `update` script in [Getting started](#getting-started) builds both the GUI and the CLI. It creates `artifacts/cli/kameo` on macOS, Linux, WSL, and WSL2, or `artifacts\cli\kameo.exe` on Windows. The `start` script also builds them if they are missing. **These scripts do not install a global tool or add `kameo` to `PATH`.** You can [install the CLI as a global tool](#build-and-install-as-a-net-global-tool) or use the source-build wrapper below.
@@ -323,7 +329,7 @@ kameo edit prf_REPLACE_WITH_ID --endpoints-file /absolute/path/to/endpoints.json
 
 | Harness | Profile isolation | Native artifact |
 | --- | --- | --- |
-| Claude Code | `CLAUDE_CONFIG_DIR` | `.credentials.json`; scoped Keychain bridge on macOS |
+| Claude Code | `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR`, profile-local `ANTHROPIC_CONFIG_DIR` | `.credentials.json`; scoped Keychain bridge on macOS |
 | Codex | `CODEX_HOME`, file credential storage | `auth.json` |
 | Antigravity | Isolated account token file and settings, or selected API key supplied to `agy` | Google accounts require CLI 1.5.7; legacy login files are preserved |
 | Mux | `MUX_CONFIG_DIR` | `endpoints.json`, imported or refreshed from a shared source |
@@ -331,6 +337,8 @@ kameo edit prf_REPLACE_WITH_ID --endpoints-file /absolute/path/to/endpoints.json
 Kameo keeps a stable native directory for each profile, allowing the harness to refresh its own tokens and retain its profile-specific state. It does not copy refreshed tokens back into the original imported login. On macOS, Claude's directory-scoped Keychain entry is restored from the profile's file when the first session starts and snapshotted after each exit. Additional sessions share the live entry without restoring an older file over refreshed credentials. Deleting that profile also removes its scoped Keychain entry, leaving the default login alone.
 
 Existing supported file-based logins and Claude's macOS Keychain login can be imported automatically. For Codex logins stored only in an OS credential store, use **Sign in** to create an isolated login or import an exported native credential file. Antigravity imports accept its account token file; shared OS-keyring logins require a separate sign-in. Provider credential formats may evolve; the [integration notes](docs/ARCHITECTURE.md) record the contracts used here.
+
+For Claude, **Sign in** uses an email-shaped profile name as the browser login hint. A profile name is a label, not an account restriction: confirm the browser is authorizing the intended account. If it offers another account, switch accounts or open the login URL in a browser profile signed in to the intended account. After an incorrect sign-in, close that profile's Claude sessions, use **Sign in** on the intended Kameo card, and check `/status` in the next session. Kameo pins Claude's credential stores to the selected profile and clears inherited Anthropic profile and federation selectors, but it does not isolate browser cookies.
 
 You can launch multiple simultaneous sessions using the same profile and login, including in different project folders. Ordinary sessions share the profile’s native directory and credentials; native token refresh remains managed by the harness. Sign-in/setup, editing, import, and deletion require all sessions for that profile to be closed. You can change the selection at any time; existing sessions keep their original profile.
 

@@ -55,6 +55,52 @@ namespace Test.Shared
                 LaunchPlan next = service.Prepare(fixture.Store.Selected(HarnessKind.Codex), Array.Empty<string>());
                 Fixture.Check(old.StartInfo.Environment["CODEX_HOME"] != next.StartInfo.Environment["CODEX_HOME"] && old.ProfileId == first.Id, "Old session changed with selection.");
             });
+            Add("ClaudeLoginEmailHint", fixture =>
+            {
+                Profile profile = fixture.Add(HarnessKind.Claude, "work@example.test", CredentialKind.Native);
+                LaunchService launcher = new LaunchService(fixture.Store);
+                Fixture.Check(launcher.Prepare(profile, Array.Empty<string>(), true).StartInfo.ArgumentList.SequenceEqual(new[] { "auth", "login", "--email", profile.Name }), "Email profile did not supply a login hint.");
+                Fixture.Check(launcher.Prepare(profile, Array.Empty<string>()).StartInfo.ArgumentList.Count == 0, "Ordinary launch received login flags.");
+                foreach (string[] arguments in new[] { new[] { "--email", "other@example.test" }, new[] { "--email=other@example.test" } })
+                    Fixture.Check(launcher.Prepare(profile, arguments, true).StartInfo.ArgumentList.SequenceEqual(new[] { "auth", "login" }.Concat(arguments)), "Explicit email was overridden or duplicated.");
+                profile.Name = "Work account";
+                Fixture.Check(launcher.Prepare(profile, Array.Empty<string>(), true).StartInfo.ArgumentList.SequenceEqual(new[] { "auth", "login" }), "Display name was treated as an email.");
+            });
+            cases.Add(KameoSuites.Case("Launch", "ClaudeInheritedCredentialStoresAreIsolated", async (fixture, cancellationToken) =>
+            {
+                string outside = Path.Combine(fixture.Root, "other-account");
+                PrivateFiles.DirectoryCreate(outside);
+                string sentinel = Path.Combine(outside, ".credentials.json");
+                PrivateFiles.Write(sentinel, CredentialCases.Document(HarnessKind.Claude));
+                Dictionary<string, string> inherited = new Dictionary<string, string>
+                {
+                    ["CLAUDE_CONFIG_DIR"] = outside, ["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = outside,
+                    ["ANTHROPIC_CONFIG_DIR"] = outside, ["ANTHROPIC_PROFILE"] = "other-account",
+                    ["ANTHROPIC_FEDERATION_RULE_ID"] = "synthetic-rule", ["ANTHROPIC_ORGANIZATION_ID"] = "synthetic-org",
+                    ["ANTHROPIC_IDENTITY_TOKEN"] = "synthetic-token", ["ANTHROPIC_IDENTITY_TOKEN_FILE"] = sentinel,
+                    ["CLAUDE_CODE_FEDERATION_CACHE_DIR"] = outside
+                };
+                foreach (CredentialKind kind in new[] { CredentialKind.Native, CredentialKind.ApiKey })
+                {
+                    Profile profile = fixture.Add(HarnessKind.Claude, kind + "@example.test", kind);
+                    profile.Executable = Fixture.Probe(); fixture.Store.Update(profile);
+                    foreach (bool login in kind == CredentialKind.Native ? new[] { false, true } : new[] { false })
+                    {
+                        string capture = Path.Combine(fixture.Root, kind + "-" + login + ".json");
+                        CliResult result = await CliCases.RunAsync(fixture, new[] { login ? "login" : "run-profile", profile.Id, "--", "--capture", capture }, null, cancellationToken, inherited).ConfigureAwait(false);
+                        Fixture.Check(result.ExitCode == 0, "Synthetic Claude did not start.");
+                        JsonNode data = JsonNode.Parse(File.ReadAllText(capture))!;
+                        string directory = fixture.Store.ProfileDirectory(profile.Id);
+                        Fixture.Check(data["environment"]?["KAMEO_PROFILE_ID"]?.GetValue<string>() == profile.Id, "Claude used another profile.");
+                        foreach (string variable in new[] { "CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR" })
+                            Fixture.Check(data["environment"]?[variable]?.GetValue<string>() == directory, "Claude credential storage escaped the selected profile.");
+                        Fixture.Check(data["environment"]?["ANTHROPIC_CONFIG_DIR"]?.GetValue<string>() == Path.Combine(directory, "anthropic"), "Anthropic fallback storage escaped the selected profile.");
+                        Fixture.Check(data["hasClaudeCredentialOverride"]?.GetValue<bool>() == false, "An inherited credential selector reached Claude.");
+                        if (login) Fixture.Check(data["arguments"]!.AsArray().Any(value => value?.GetValue<string>() == profile.Name), "CLI sign-in lost the email hint.");
+                    }
+                }
+                Fixture.Check(PrivateFiles.Read(sentinel) == CredentialCases.Document(HarnessKind.Claude), "Another account's credentials changed.");
+            }));
             Add("ParentEnvironmentUnchanged", fixture =>
             {
                 string? before = Environment.GetEnvironmentVariable("CODEX_HOME");

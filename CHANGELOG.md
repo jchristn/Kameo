@@ -8,6 +8,11 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 Alpha. Initial release.
 
+- Verify simultaneous independent profiles for all four harnesses in API-key and native/file mode, including sign-in to one profile while another remains open. Clarify that busy-profile restrictions apply only to that profile.
+
+- Pin Claude's separate credential and Anthropic fallback stores to the selected profile, and remove inherited profile and federation selectors that could choose another account.
+- Use email-shaped Claude profile names as sign-in hints, with recovery guidance for a browser authorizing the wrong account.
+
 - Plan usage for Claude Code and Codex native logins. Opening Claude Code or Codex in the desktop checks each login's 5-hour, weekly, and per-model limits and shows them as bars with the percentage used and reset times. Results are reused for 15 minutes; **Refresh usage** (or **View > Refresh Usage**) checks again now. `kameo usage [claude|codex|ID] [--offline] [--json]` prints the same in a terminal.
 - **Launch lowest usage** starts the login with the most headroom: the one whose tightest limit has the lowest percentage used.
 - Claude Code usage is read with the profile's saved sign-in and is never refreshed by Kameo. Codex usage comes from the profile's isolated `codex app-server`, falling back to limits recorded in the profile's last session. API-key profiles report no plan limits.
