@@ -107,14 +107,6 @@ namespace Kameo.Core
         {
             cancellationToken.ThrowIfCancellationRequested();
             using FileStream preparation = await _Store.AcquirePreparationLeaseAsync(id, cancellationToken).ConfigureAwait(false);
-            bool firstSession = true;
-            if (!login)
-            {
-                // The preparation lease serializes this idle check with other session starts and snapshots.
-                // Keep the existing lock path so older exclusive sessions still protect their credentials.
-                try { using FileStream idle = _Store.AcquireLease(id); }
-                catch (InvalidOperationException) { firstSession = false; }
-            }
             using FileStream lease = login ? _Store.AcquireLease(id) : _Store.AcquireSessionLease(id);
             Profile profile = _Store.Get(id);
             LaunchPlan plan = Prepare(profile, arguments, login);
@@ -122,8 +114,9 @@ namespace Kameo.Core
             if (profile.Harness == HarnessKind.Antigravity && profile.Kind == CredentialKind.Native)
                 await AntigravityCompatibility.VerifyAsync(resolved, _Store.ProfileDirectory(id), cancellationToken).ConfigureAwait(false);
             bool bridge = profile.Harness == HarnessKind.Claude && profile.Kind == CredentialKind.Native && OperatingSystem.IsMacOS();
-            if (bridge && firstSession)
-                await MacCredentialBridge.RestoreAsync(_Store.ProfileDirectory(id), cancellationToken).ConfigureAwait(false);
+            // The preparation lease serializes this with other sessions. The Keychain login wins unless it is missing,
+            // cleared or older, so a refreshed login survives a session that ended without saving it.
+            if (bridge) await MacCredentialBridge.SynchronizeAsync(_Store.ProfileDirectory(id), true, cancellationToken).ConfigureAwait(false);
             using Process process = new Process { StartInfo = resolved };
             cancellationToken.ThrowIfCancellationRequested();
             process.Start();
@@ -143,7 +136,9 @@ namespace Kameo.Core
                 if (bridge)
                 {
                     using FileStream snapshot = await _Store.AcquirePreparationLeaseAsync(id, CancellationToken.None).ConfigureAwait(false);
-                    await MacCredentialBridge.SnapshotAsync(_Store.ProfileDirectory(id), CancellationToken.None).ConfigureAwait(false);
+                    // Best effort: the next launch saves the Keychain login if this cannot.
+                    try { await MacCredentialBridge.SynchronizeAsync(_Store.ProfileDirectory(id), false, CancellationToken.None).ConfigureAwait(false); }
+                    catch (Exception error) when (error is InvalidOperationException or IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { }
                 }
                 if (profile.Harness == HarnessKind.Antigravity && profile.Kind == CredentialKind.Native)
                     AntigravityAuthentication.ProtectCredentialFile(_Store.ProfileDirectory(id));

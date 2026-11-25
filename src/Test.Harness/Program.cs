@@ -34,6 +34,7 @@ namespace Test.Harness
                 hasClaudeOverride |= Environment.GetEnvironmentVariable(name) != null;
             JsonObject result = new JsonObject { ["arguments"] = arguments, ["environment"] = environment, ["cwd"] = Environment.CurrentDirectory };
             result["hasClaudeCredentialOverride"] = hasClaudeOverride;
+            result["pid"] = Environment.ProcessId;
             string capturePath = args[capture + 1];
             await File.WriteAllTextAsync(capturePath + ".tmp", result.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
             File.Move(capturePath + ".tmp", capturePath);
@@ -45,6 +46,8 @@ namespace Test.Harness
                 JsonObject document = new JsonObject { ["auth_method"] = "consumer", ["token"] = new JsonObject { ["access_token"] = args[token + 1], ["refresh_token"] = "synthetic-refresh" } };
                 await File.WriteAllTextAsync(path, document.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
             }
+            int refreshed = Array.IndexOf(args, "--write-credential");
+            if (refreshed >= 0) await WriteCredentialAsync(args, args[refreshed + 1]).ConfigureAwait(false);
             int sleep = Array.IndexOf(args, "--sleep");
             if (sleep >= 0) await Task.Delay(30000, CancellationToken.None).ConfigureAwait(false);
             int wait = Array.IndexOf(args, "--wait-for-file");
@@ -55,6 +58,37 @@ namespace Test.Harness
             }
             int exit = Array.IndexOf(args, "--exit");
             return exit >= 0 ? int.Parse(args[exit + 1], System.Globalization.CultureInfo.InvariantCulture) : 0;
+        }
+
+        /// <summary>Acts like a harness refreshing its native login: writes a synthetic credential where the harness keeps it.</summary>
+        private static async Task WriteCredentialAsync(string[] args, string token)
+        {
+            string path;
+            JsonObject document;
+            int gemini = Array.IndexOf(args, "--gemini_dir");
+            if (Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is string claude)
+            {
+                path = Path.Combine(claude, ".credentials.json");
+                document = new JsonObject { ["claudeAiOauth"] = new JsonObject { ["accessToken"] = token, ["refreshToken"] = token + "-refresh", ["expiresAt"] = 1900000000000 } };
+            }
+            else if (Environment.GetEnvironmentVariable("CODEX_HOME") is string codex)
+            {
+                path = Path.Combine(codex, "auth.json");
+                document = new JsonObject { ["tokens"] = new JsonObject { ["access_token"] = token, ["refresh_token"] = token + "-refresh" } };
+            }
+            else if (Environment.GetEnvironmentVariable("MUX_CONFIG_DIR") is string mux)
+            {
+                path = Path.Combine(mux, "endpoints.json");
+                document = new JsonObject { ["endpoints"] = new JsonArray(new JsonObject { ["name"] = "test", ["adapterType"] = "openai", ["model"] = token }) };
+            }
+            else if (gemini >= 0)
+            {
+                path = Path.Combine(args[gemini + 1], "antigravity-cli", "antigravity-oauth-token");
+                document = new JsonObject { ["auth_method"] = "consumer", ["token"] = new JsonObject { ["access_token"] = token, ["refresh_token"] = token + "-refresh" } };
+            }
+            else throw new InvalidOperationException("The fixture could not find a harness credential location.");
+            await File.WriteAllTextAsync(path + ".tmp", document.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
+            File.Move(path + ".tmp", path, true);
         }
 
         /// <summary>

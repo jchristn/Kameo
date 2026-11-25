@@ -30,6 +30,8 @@ namespace Kameo.Core
             Validate(profile.Harness, rawCredentialJson);
             if (profile.Harness == HarnessKind.Mux) rawCredentialJson = MuxCredentialImport.Resolve(rawCredentialJson, Environment.GetEnvironmentVariable);
             PrivateFiles.Write(Path.Combine(_Store.ProfileDirectory(id), HarnessCatalog.CredentialFile(profile.Harness)), rawCredentialJson);
+            // An older Keychain login could otherwise outrank the imported file at the next launch.
+            if (profile.Harness == HarnessKind.Claude) MacCredentialBridge.DeleteScoped(_Store.ProfileDirectory(id));
         }
 
         /// <summary>Checks the minimum native credential shape without exposing input in errors.</summary>

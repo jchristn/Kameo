@@ -94,20 +94,20 @@ namespace Kameo.Core
             };
         }
 
-        /// <summary>Returns the freshest saved login: the scoped macOS Keychain entry when present, otherwise the profile file.</summary>
+        /// <summary>Returns the fresher usable login of the scoped macOS Keychain entry and the profile file.</summary>
         internal static async Task<string?> ReadCredentialAsync(string directory, CancellationToken cancellationToken)
         {
-            if (OperatingSystem.IsMacOS())
-            {
-                try
-                {
-                    string? live = await MacCredentialBridge.ReadAsync(MacCredentialBridge.ServiceName(directory), cancellationToken).ConfigureAwait(false);
-                    if (!string.IsNullOrWhiteSpace(live)) return live;
-                }
-                catch (Exception error) when (error is IOException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
-            }
             string path = Path.Combine(directory, HarnessCatalog.CredentialFile(HarnessKind.Claude));
-            return File.Exists(path) ? PrivateFiles.Read(path) : null;
+            string? file = File.Exists(path) ? PrivateFiles.Read(path) : null;
+            if (!OperatingSystem.IsMacOS()) return file;
+            string? live = null;
+            try { live = await MacCredentialBridge.ReadAsync(MacCredentialBridge.ServiceName(directory), cancellationToken).ConfigureAwait(false); }
+            catch (Exception error) when (error is IOException or InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            // Prefer the fresher usable login. Claude clears the Keychain item's tokens when a refresh fails.
+            long? liveFreshness = MacCredentialBridge.Freshness(live);
+            long? fileFreshness = MacCredentialBridge.Freshness(file);
+            if (liveFreshness != null && (fileFreshness == null || liveFreshness.Value >= fileFreshness.Value)) return live;
+            return fileFreshness != null ? file : (string.IsNullOrWhiteSpace(live) ? file : live);
         }
 
         /// <summary>Parses the usage endpoint's windows. Utilization is a 0 to 100 percentage.</summary>

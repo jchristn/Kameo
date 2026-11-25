@@ -4,6 +4,7 @@ namespace Kameo.Cli
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
+    using System.Runtime.InteropServices;
     using System.Threading;
     using System.Threading.Tasks;
     using Kameo.Core;
@@ -14,8 +15,16 @@ namespace Kameo.Cli
         {
             using CancellationTokenSource cancellation = new CancellationTokenSource();
             Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancellation.Cancel(); };
+            // Closing a terminal window sends SIGHUP. Cancel instead of dying so a session stops its harness and saves its login.
+            using PosixSignalRegistration? hangup = Register(PosixSignal.SIGHUP, cancellation);
+            using PosixSignalRegistration? terminate = Register(PosixSignal.SIGTERM, cancellation);
             try { return await ExecuteAsync(args, cancellation.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) { Console.Error.WriteLine("Canceled."); return 130; }
+            catch (OperationCanceledException)
+            {
+                // After a hangup the terminal may already be gone.
+                try { Console.Error.WriteLine("Canceled."); } catch (IOException) { }
+                return 130;
+            }
             catch (System.Text.Json.JsonException) { Console.Error.WriteLine("Kameo: A profile's native configuration is not valid JSON. Repair or re-import it before launching."); return 1; }
             catch (Exception error) when (error is ArgumentException or InvalidOperationException or IOException or InvalidDataException or UnauthorizedAccessException or KeyNotFoundException or TimeoutException or System.ComponentModel.Win32Exception or Microsoft.Data.Sqlite.SqliteException)
             {
@@ -24,6 +33,12 @@ namespace Kameo.Cli
                 Console.Error.WriteLine("Kameo: " + message);
                 return 1;
             }
+        }
+
+        private static PosixSignalRegistration? Register(PosixSignal signal, CancellationTokenSource cancellation)
+        {
+            try { return PosixSignalRegistration.Create(signal, context => { context.Cancel = true; cancellation.Cancel(); }); }
+            catch (PlatformNotSupportedException) { return null; }
         }
 
         private static async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken)

@@ -8,6 +8,8 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 Alpha. Initial release.
 
+- Claude Code logins on macOS persist across new terminal windows. The profile's Keychain login is now authoritative: Kameo saves it at every launch and exit and restores its saved copy only when the Keychain login is missing, cleared, or older. Previously a launch restored the saved copy unconditionally, replacing refreshed tokens and forcing `/login`. Closing a terminal window now ends the session cleanly instead of skipping the save, and importing a Claude credential file replaces the profile's Keychain login.
+
 - Verify simultaneous independent profiles for all four harnesses in API-key and native/file mode, including sign-in to one profile while another remains open. Clarify that busy-profile restrictions apply only to that profile.
 
 - Pin Claude's separate credential and Anthropic fallback stores to the selected profile, and remove inherited profile and federation selectors that could choose another account.
