@@ -158,7 +158,7 @@ With the .NET 10 SDK installed, run these commands from the clone's root. They w
 
 ```sh
 dotnet pack src/Kameo.Cli/Kameo.Cli.csproj -c Release -o artifacts/packages
-dotnet tool install --global Kameo.Cli --version 0.1.0 --source ./artifacts/packages
+dotnet tool install --global Kameo.Cli --version 0.1.2 --source ./artifacts/packages
 kameo --version
 ```
 
@@ -187,7 +187,7 @@ To install a rebuilt copy, run the following from the clone's root. During the a
 ```sh
 dotnet pack src/Kameo.Cli/Kameo.Cli.csproj -c Release -o artifacts/packages
 dotnet tool uninstall --global Kameo.Cli
-dotnet tool install --global Kameo.Cli --version 0.1.0 --source ./artifacts/packages --no-http-cache
+dotnet tool install --global Kameo.Cli --version 0.1.2 --source ./artifacts/packages --no-http-cache
 ```
 
 The platform `update` scripts rebuild the source outputs; they do not replace an installed global tool. To remove just the global command, run `dotnet tool uninstall --global Kameo.Cli`. Your profiles and credentials remain intact. See Microsoft's [.NET tools guide](https://learn.microsoft.com/en-us/dotnet/core/tools/global-tools) for global-tool installation details.
