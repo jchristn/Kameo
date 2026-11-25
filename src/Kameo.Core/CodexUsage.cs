@@ -80,7 +80,7 @@ namespace Kameo.Core
                     JsonObject initialize = new JsonObject
                     {
                         ["id"] = 1, ["method"] = "initialize",
-                        ["params"] = new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "kameo", ["title"] = "Kameo", ["version"] = "0.1.0" } }
+                        ["params"] = new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "kameo", ["title"] = "Kameo", ["version"] = "0.1.1" } }
                     };
                     await SendAsync(process, initialize, timeout.Token).ConfigureAwait(false);
                     using (JsonDocument ignored = await ResponseAsync(process, 1, timeout.Token).ConfigureAwait(false)) { }

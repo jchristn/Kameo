@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/logo-dark.png" width="240" alt="Kameo chameleon logo" /></p>
 
-<p align="center"><strong>v0.1.0 · Alpha</strong></p>
+<p align="center"><strong>v0.1.1 · Alpha</strong></p>
 
 # Kameo
 
@@ -182,7 +182,7 @@ For future terminals, add `~/.dotnet/tools` to your shell's `PATH`, or `%USERPRO
 
 You can now change to any project directory and run `kameo list`, `kameo codex`, or another harness command. The global CLI uses the same `~/.kameo/` profiles as the desktop, or the directory selected by `KAMEO_HOME`. It runs independently of the clone after installation.
 
-To install a rebuilt copy, run the following from the clone's root. During the alpha, builds retain version `0.1.0`, so uninstall and reinstall to replace that version rather than relying on a version-based update:
+To install a rebuilt copy, run the following from the clone's root. During the alpha, builds retain version `0.1.1`, so uninstall and reinstall to replace that version rather than relying on a version-based update:
 
 ```sh
 dotnet pack src/Kameo.Cli/Kameo.Cli.csproj -c Release -o artifacts/packages

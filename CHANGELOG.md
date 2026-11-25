@@ -2,6 +2,16 @@
 
 All notable changes to Kameo are recorded here. Versions follow [Semantic Versioning](https://semver.org); every 0.x.y release is an alpha.
 
+## [Unreleased]
+
+## [0.1.1] - 2026-11-24
+
+Alpha. Windows sign-in fixes.
+
+- Windows: the npm-shim launcher now targets a shim's actual invocation line, so `codex` (whose `.cmd` probes for a bundled `node.exe` before the exec line) is no longer mistaken for Node and run as a syntax check.
+- Windows: harness executables are also resolved from the persisted user and machine PATH, not only the running process's copy, so a CLI added to PATH after Kameo started (such as Antigravity's `agy`) is found without restarting.
+- Antigravity Google account profiles accept CLI 1.5.7 or any later 1.5.x release, instead of requiring exactly 1.5.7.
+
 ## [0.1.0] - 2026-11-24
 
 Alpha. Initial release.

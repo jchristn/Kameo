@@ -2,7 +2,7 @@
 
 Kameo is a local C#/.NET 10 desktop and CLI application. Source and tests belong under `src/`.
 
-- Preserve version `0.1.0` unless the user explicitly requests a version change. Alpha is indicated in documentation and the UI.
+- Preserve version `0.1.1` unless the user explicitly requests a version change. Alpha is indicated in documentation and the UI.
 - Follow the coding model in `~/Code/Agents/requirements` where applicable to a local desktop application. The user explicitly chose C#/Avalonia, plaintext local credentials, and independent Windows/WSL installations. Source builds remain supported; unsigned installers are built by `Kameo.Publisher` per `~/Code/Agents/requirements/INSTALLERS.md`.
 - Namespace blocks come first; usings go inside. System usings first, then other namespaces, alphabetically.
 - Use explicit types, nullable reference types, one class/enum per file, XML documentation for public APIs, and `_PascalCase` private fields. Avoid tuples and em dashes.

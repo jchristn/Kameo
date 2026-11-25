@@ -51,7 +51,7 @@ namespace Kameo.Core
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             request.Headers.Add("anthropic-beta", _OAuthBeta);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Kameo", "0.1.0"));
+            request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Kameo", "0.1.1"));
             string body;
             try
             {
