@@ -2,15 +2,13 @@
 
 All notable changes to Kameo are recorded here. Versions follow [Semantic Versioning](https://semver.org); every 0.x.y release is an alpha.
 
-## [Unreleased]
-
-- Windows: show the Kameo logo in the main window's taskbar entry and title bar.
-- Windows: Sign in and Launch now open through a `.cmd` launcher that keeps the console open after the session ends, matching the macOS behaviour. Errors are no longer flashed away before you can read them.
-- Windows: resolve harness executables by probing `.exe`, `.cmd`, and `.bat` before the extensionless filename, so npm global bins (where `claude` is an sh script and `claude.cmd` is the real shim) launch correctly. The npm-shim parser also accepts shims that invoke a sibling `.exe`, which is how current Claude Code is packaged.
-
-## [0.1.0] - 2026-11-20
+## [0.1.0] - 2026-11-24
 
 Alpha. Initial release.
+
+- Windows: show the Kameo logo in the main window's taskbar entry and title bar.
+- Windows: Sign in and Launch open through a `.cmd` launcher that keeps the console open after the session ends, matching the macOS behaviour. Errors are no longer flashed away before you can read them.
+- Windows: resolve harness executables by probing `.exe`, `.cmd`, and `.bat` before the extensionless filename, so npm global bins (where `claude` is an sh script and `claude.cmd` is the real shim) launch correctly. The npm-shim parser also accepts shims that invoke a sibling `.exe`, which is how current Claude Code is packaged.
 
 - Claude Code logins on macOS persist across new terminal windows. The profile's Keychain login is now authoritative: Kameo saves it at every launch and exit and restores its saved copy only when the Keychain login is missing, cleared, or older. Previously a launch restored the saved copy unconditionally, replacing refreshed tokens and forcing `/login`. Closing a terminal window now ends the session cleanly instead of skipping the save, and importing a Claude credential file replaces the profile's Keychain login.
 
