@@ -154,6 +154,12 @@ namespace Test.Desktop
                 Check(Text(window).Contains("No test terminal available.", StringComparison.Ordinal), "Terminal failure was not reported.");
                 Check(store.Preference("workspace") == store.Root && store.Preference("launch-permission-claude") == null, "A failed launch saved its choices.");
             }, failLaunch: true));
+            Add("OnlyReopenActivationShowsManager", (_, _) =>
+            {
+                Check(App.ShowsManagerOn(Avalonia.Controls.ApplicationLifetimes.ActivationKind.Reopen), "Clicking the Dock icon should show the manager.");
+                Check(!App.ShowsManagerOn(Avalonia.Controls.ApplicationLifetimes.ActivationKind.Background) && !App.ShowsManagerOn(Avalonia.Controls.ApplicationLifetimes.ActivationKind.File)
+                    && !App.ShowsManagerOn(Avalonia.Controls.ApplicationLifetimes.ActivationKind.OpenUri), "Activating the app for the tray's launch dialog must not raise the manager over it.");
+            });
             Add("OneLaunchDialogAtATime", (_, store) => WithLaunchWindow(store, _ => Task.FromResult<string?>(null), (window, launches) =>
             {
                 Click(Button(window, "Launch")); LaunchOptionsWindow first = Dialog(window);

@@ -82,10 +82,16 @@ namespace Kameo.Desktop
                     new AboutWindow(splash: true).Show(_Window);
                 }
                 if (TryGetFeature(typeof(IActivatableLifetime)) is IActivatableLifetime activatable)
-                    activatable.Activated += (_, _) => Show();
+                    activatable.Activated += (_, args) => { if (ShowsManagerOn(args.Kind)) Show(); };
             }
             base.OnFrameworkInitializationCompleted();
         }
+
+        /// <summary>
+        /// Whether an application activation should show the manager: only a Dock icon click or relaunch (Reopen). Activating
+        /// the app any other way, such as the tray's standalone launch dialog coming forward, must not raise the manager.
+        /// </summary>
+        internal static bool ShowsManagerOn(ActivationKind kind) => kind == ActivationKind.Reopen;
 
         private void Show() { _Window?.Show(); if (_Window != null) _Window.WindowState = WindowState.Normal; _Window?.Activate(); }
         private void Quit()
