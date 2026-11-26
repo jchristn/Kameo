@@ -16,7 +16,8 @@ Built with C#, .NET 10, and Avalonia for Windows, macOS, Linux, WSL, and WSL2. I
 - Independent selections for Claude Code, Codex, Antigravity, and Mux.
 - Shared Mux endpoints files: choose one JSON file for multiple profiles and pick up source changes at the next launch.
 - Plan usage for Claude Code and Codex native logins: each login's 5-hour, weekly, and model limits with reset times, checked when you open the harness and refreshed automatically every 15 minutes. **Launch lowest usage** starts the login with the most headroom, and `kameo usage` prints the same in a terminal or as JSON.
-- A tray menu with a submenu per profile (**Launch**, **Launch in...**, **Use as default**), **Lowest usage** for Claude Code and Codex, and About, plus search, launch-folder selection, and a compact desktop manager.
+- A launch dialog for choosing the folder and permission level, including each harness's skip-permissions or YOLO mode.
+- A tray menu with a submenu per profile (**Launch...**, **Use as default**), **Lowest usage...** for Claude Code and Codex, and About, plus search, launch-folder selection, and a compact desktop manager.
 - 16 palettes with coordinated light and dark backgrounds, panels, and accents: Fern, Ocean, Iris, Amber, Rose, Graphite, Seafoam, Lagoon, Cobalt, Lavender, Coral, Sand, Espresso, Midnight, Paper, and Nord.
 - Native macOS application menus, including About, Edit, Profiles, View, Window, and Quit. Profiles submenus launch the selected account in your saved folder or a folder chosen for that session.
 - Palette-aware About and two-second startup splash screens with the project logo and GitHub link. Background tray startup stays unobtrusive.
@@ -135,10 +136,12 @@ Remove any Kameo `PATH` entries, aliases, shortcuts, or symlinks you added manua
 1. Select a harness and click **Add profile**.
 2. Choose **API key** or **Native login / import**. For Antigravity, choose **Google account** or **API key**. For Mux, choose **API key** and enter the adapter, endpoint, and model, or choose **Endpoints file / setup** and browse to an existing endpoints JSON file.
 3. For native authentication, click **Sign in** to open the harness in a terminal, or **Import** to copy this computer's current login or select a native credential JSON file. The gear icon edits a profile and the trash icon deletes it. Mux's **Setup** opens its interactive TUI and first-run wizard; an existing Mux profile can use its F1 setup command.
-4. Click **Launch** on a profile's card to start it in the saved launch folder, or **Launch in...** to choose a folder for this session only. Every profile has its own buttons, so you can launch any account without changing the selection.
+4. Click **Launch** on a profile's card. A dialog asks for the folder (the saved launch folder unless you change it, with an option to make your choice the new default) and the permission level, then opens a terminal. Every profile has its own button, so you can launch any account without changing the selection.
+
+   Permission levels map to each harness's own flags. Every harness starts with **Ask (harness default)**, which adds nothing. Claude Code also offers accept edits, plan, auto, and **Skip all permission prompts** (`--dangerously-skip-permissions`). Codex offers read only, automatic review (`--approve-for-me`), and **Bypass approvals and sandbox** (`--dangerously-bypass-approvals-and-sandbox`). Antigravity offers accept edits, plan, auto, and `--dangerously-skip-permissions`. Mux offers deny and **YOLO** (`--yolo`). The bypass levels run commands without asking and show a warning. Kameo remembers the last level per harness and preselects it next time.
 5. Click **Use profile**, or **Use as default** in the tray, to make it the selected profile, which `kameo claude`, `kameo codex`, and the other terminal commands use. The first profile for a harness is selected automatically.
 
-   In the tray, each harness lists its profiles, with a tick on the selected one. Each profile opens a submenu with **Launch**, **Launch in...**, and **Use as default**. Claude Code and Codex with two or more native logins also have **Lowest usage** at the top, which launches the login with the most headroom. Canceling the folder picker starts nothing; choosing a folder with **Launch in...** does not change the saved launch folder in the sidebar.
+   In the tray, each harness lists its profiles, with a tick on the selected one. Each profile opens a submenu with **Launch...** and **Use as default**. Claude Code and Codex with two or more native logins also have **Lowest usage...** at the top, which opens the launch dialog for the login with the most headroom. Tray launches show only the dialog, not the manager window. Canceling the dialog starts nothing and saves nothing.
 
 The executable field accepts an executable name, absolute native executable path, or JavaScript entry point. On Windows, standard npm `.cmd` shims are resolved to their JavaScript entry points and launched with Node.js. Arbitrary batch files are rejected, so harness arguments never pass through `cmd.exe` inside Kameo.
 
@@ -236,7 +239,7 @@ kameo mux
 kameo run codex -- --help
 ```
 
-These are Kameo commands; the original `claude`, `codex`, `agy`, and `mux` commands keep their existing behavior. `kameo antigravity` launches Antigravity's `agy` executable. Wrappers preserve the current working directory, argument boundaries, and harness exit code. Desktop **Launch** uses the saved launch folder; **Launch in...** uses the folder chosen for that invocation.
+These are Kameo commands; the original `claude`, `codex`, `agy`, and `mux` commands keep their existing behavior. `kameo antigravity` launches Antigravity's `agy` executable. Wrappers preserve the current working directory, argument boundaries, and harness exit code. Desktop **Launch** runs `kameo run-profile ID -- [permission flags]` in the folder chosen in its dialog. From a terminal, pass the same flags yourself, for example `kameo claude --dangerously-skip-permissions`.
 
 ```sh
 kameo list
@@ -279,7 +282,7 @@ kameo usage --offline       # no network: Codex limits recorded during each logi
 kameo usage --json          # machine-readable
 ```
 
-Checks are read-only. Claude Code usage is read from Anthropic with the profile's saved sign-in; Kameo never refreshes or rewrites it, so an expired sign-in asks you to launch the profile once and check again. Codex usage comes from the profile's own `codex app-server` (Codex manages its tokens), and falls back to the limits Codex recorded during the profile's last session. API keys are billed per token and have no plan limits. Claude's usage endpoint is not a documented public API and may change.
+Claude Code usage is read from Anthropic with the profile's saved sign-in. Claude Code access tokens last about eight hours, so when a sign-in is within 30 minutes of expiring (or Anthropic rejects it), Kameo renews it the way Claude Code does and saves the new tokens to the profile, including its macOS Keychain entry. Kameo renews only idle profiles: while any session for that profile is open, Claude Code owns its tokens and Kameo leaves them alone, because refresh tokens rotate and renewing underneath a running session could sign it out. Sessions you start outside Kameo with the profile's directory are not detected, so launch profiles through Kameo. If the sign-in has been revoked, usage asks you to sign in again. Codex usage comes from the profile's own `codex app-server` (Codex manages its tokens), and falls back to the limits Codex recorded during the profile's last session. API keys are billed per token and have no plan limits. Claude's usage endpoint is not a documented public API and may change.
 
 Run `kameo --help` for the full command list. `KAMEO_HOME` or `kameo --home /absolute/path ...` selects an alternate data directory.
 
@@ -289,7 +292,7 @@ Install [Antigravity CLI](https://antigravity.google/docs/install?tab=cli) separ
 
 1. Add an **Antigravity → Google account** profile, give it a name, and save.
 2. Click **Sign in**. Follow the URL in the terminal, choose the Google account, and paste the returned authorization code into **that terminal**. The code is not an API key and does not belong in Kameo's API-key field.
-3. Repeat with another profile for each account. Click **Launch** or **Launch in...** on its card, or select it and run `kameo antigravity`.
+3. Repeat with another profile for each account. Click **Launch** on its card, or select it and run `kameo antigravity`.
 
 Each profile keeps its own renewable login file. Separate profiles can run concurrently, and token refresh stays with the profile that started the session. Kameo disables Antigravity's automatic updater for managed account sessions so it cannot silently change the verified storage behavior. Updating the CLI separately may require a compatible Kameo update. Managed account sessions use Antigravity's SSH-style file storage; child tools inherit the SSH-session indicator. The original `agy` command retains its normal behavior.
 

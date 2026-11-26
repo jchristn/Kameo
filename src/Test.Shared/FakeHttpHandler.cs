@@ -10,6 +10,7 @@ namespace Test.Shared
     internal sealed class FakeHttpHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _Respond;
+        private readonly object _Gate = new object();
 
         internal FakeHttpHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) => _Respond = respond;
 
@@ -21,11 +22,15 @@ namespace Test.Shared
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Calls++;
-            LastUri = request.RequestUri;
-            LastMethod = request.Method;
-            LastHeaders.Clear();
-            foreach (KeyValuePair<string, IEnumerable<string>> header in request.Headers) LastHeaders[header.Key] = string.Join(",", header.Value);
+            lock (_Gate)
+            {
+                Calls++;
+                LastUri = request.RequestUri;
+                LastMethod = request.Method;
+                LastHeaders.Clear();
+                foreach (KeyValuePair<string, IEnumerable<string>> header in request.Headers) LastHeaders[header.Key] = string.Join(",", header.Value);
+            }
+            // Responders run outside the lock so concurrency tests can overlap requests.
             return Task.FromResult(_Respond(request));
         }
     }

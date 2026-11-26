@@ -223,6 +223,28 @@ namespace Test.Shared
                 }
                 fixture.Store.Update(profile);
             }));
+            Add("PermissionLevelsPassThroughIsolation", fixture =>
+            {
+                foreach (HarnessKind harness in HarnessCatalog.All)
+                {
+                    IReadOnlyList<LaunchPermission> levels = LaunchPermissions.For(harness);
+                    Fixture.Check(levels[0].Id == LaunchPermissions.DefaultId && levels[0].Arguments.Count == 0 && !levels[0].IsDangerous, harness + " must start with a default level that adds no arguments.");
+                    Fixture.Check(levels.Select(level => level.Id).Distinct(StringComparer.Ordinal).Count() == levels.Count, harness + " permission identifiers must be unique.");
+                    Fixture.Check(levels.Count(level => level.IsDangerous) == 1 && levels.Single(level => level.IsDangerous).Id == "bypass", harness + " must offer exactly one dangerous bypass level.");
+                    Fixture.Check(LaunchPermissions.Find(harness, "unknown") == levels[0] && LaunchPermissions.Find(harness, null) == levels[0] && LaunchPermissions.Find(harness, "bypass").IsDangerous, "Unknown levels must fall back to the default.");
+                    Profile profile = fixture.Add(harness, "Permissions " + harness);
+                    if (harness == HarnessKind.Mux) new CredentialFiles(fixture.Store).ConfigureMux(profile.Id, "openai", "https://example.test", "test-model");
+                    foreach (LaunchPermission level in levels)
+                    {
+                        ProcessStartInfo start = new LaunchService(fixture.Store).Prepare(profile, level.Arguments).StartInfo;
+                        Fixture.Check(start.ArgumentList.TakeLast(level.Arguments.Count).SequenceEqual(level.Arguments), harness + " " + level.Id + " arguments were changed or rejected.");
+                    }
+                }
+                Fixture.Check(LaunchPermissions.Find(HarnessKind.Claude, "bypass").Arguments.SequenceEqual(new[] { "--dangerously-skip-permissions" })
+                    && LaunchPermissions.Find(HarnessKind.Codex, "bypass").Arguments.SequenceEqual(new[] { "--dangerously-bypass-approvals-and-sandbox" })
+                    && LaunchPermissions.Find(HarnessKind.Mux, "bypass").Arguments.SequenceEqual(new[] { "--yolo" }), "Bypass flags changed.");
+                Fixture.Check(LaunchPermissions.PreferenceName(HarnessKind.Claude) == "launch-permission-claude", "The remembered level preference name changed.");
+            });
             return new TestSuiteDescriptor("Launch", "Harness isolation and real child processes", cases);
         }
 

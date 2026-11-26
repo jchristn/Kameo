@@ -2,16 +2,22 @@ namespace Kameo.Desktop
 {
     using System;
     using System.Diagnostics;
+    using System.Collections.Generic;
     using System.IO;
     using System.Text;
     using Kameo.Core;
 
+    /// <summary>Opens a visible terminal running the Kameo CLI for a launch or sign-in.</summary>
     internal static class TerminalLauncher
     {
-        internal static void Open(ProfileStore store, string id, bool login, string workingDirectory)
+        /// <summary>Opens a terminal for a request. Harness arguments follow <c>--</c> so the CLI passes them through unchanged.</summary>
+        internal static void Open(ProfileStore store, LaunchRequest request)
         {
             string cli = FindCli();
-            string[] args = { "--home", store.Root, login ? "login" : "run-profile", id };
+            string id = request.ProfileId;
+            string workingDirectory = request.WorkingDirectory;
+            List<string> args = new List<string> { "--home", store.Root, request.Login ? "login" : "run-profile", id };
+            if (request.Arguments.Count > 0) { args.Add("--"); args.AddRange(request.Arguments); }
             if (OperatingSystem.IsWindows())
             {
                 string directory = Path.Combine(store.Root, "launchers");

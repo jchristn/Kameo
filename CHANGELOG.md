@@ -4,6 +4,9 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 ## [Unreleased]
 
+- Idle Claude Code sign-ins no longer expire between sessions. When a usage check finds a sign-in within 30 minutes of expiring, or Anthropic rejects it, Kameo renews it as Claude Code does and saves the rotated tokens to the profile file and its macOS Keychain entry. Profiles with an open session are left to Claude Code, so renewal never invalidates a running session's tokens. A revoked sign-in now says to sign in again.
+- Launching opens a dialog with the folder and a permission level, replacing **Launch in...**. Levels map to each harness's flags, including Claude Code's `--dangerously-skip-permissions`, Codex's `--dangerously-bypass-approvals-and-sandbox`, and Mux's `--yolo`, with a warning for the bypass levels. The last level per harness is remembered, and the folder can be saved as the new default. Cards, the Profiles menu, **Launch lowest usage**, and the tray's **Launch...** and **Lowest usage...** all use it; tray launches show only the dialog.
+
 ## [0.1.2] - 2026-11-25
 
 Alpha. Automatic usage refresh.

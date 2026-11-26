@@ -14,10 +14,12 @@ namespace Test.Shared
     using Kameo.Core;
     using Touchstone.Core;
 
-    /// <summary>Plan usage for Claude Code and Codex using an in-process HTTP handler and a synthetic app-server. No provider is contacted.</summary>
+    /// <summary>Plan usage and Claude sign-in renewal using an in-process HTTP handler, an in-memory Keychain and a synthetic app-server. No provider is contacted.</summary>
     internal static class UsageCases
     {
         private static readonly Uri _Endpoint = new Uri("https://usage.invalid/api/oauth/usage");
+        private static readonly Uri _TokenEndpoint = new Uri("https://token.invalid/v1/oauth/token");
+        private const string _Renewed = "{\"access_token\":\"renewed-access\",\"refresh_token\":\"renewed-refresh\",\"expires_in\":28800,\"refresh_token_expires_in\":2592000,\"scope\":\"user:inference user:profile\",\"token_type\":\"Bearer\"}";
 
         internal static TestSuiteDescriptor Build()
         {
@@ -44,13 +46,138 @@ namespace Test.Shared
                 Fixture.Check(report.Windows[2].ResetsAt == null && report.Windows[3].WindowMinutes == 10080, "Null resets or model windows parsed incorrectly.");
                 Fixture.Check(report.Plan == "Max 20x" && report.Detail == "Extra usage enabled", "Plan or detail missing: " + report.Plan + " / " + report.Detail);
             });
-            Add("ClaudeExpiredLoginSkipsNetwork", async (fixture, cancellationToken) =>
+            Add("ClaudeExpiredLoginRenewalFailureSkipsUsage", async (fixture, cancellationToken) =>
             {
                 Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddMinutes(-5));
-                FakeHttpHandler handler = new FakeHttpHandler(_ => throw new InvalidOperationException("Network must not be used."));
+                string before = Saved(fixture, profile);
+                FakeHttpHandler handler = new FakeHttpHandler(request => request.RequestUri == _TokenEndpoint ? Json(HttpStatusCode.ServiceUnavailable, "synthetic-refresh") : throw new InvalidOperationException("Usage must not be checked."));
                 UsageReport report = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
-                Fixture.Check(report.Status == UsageStatus.Expired && handler.Calls == 0 && report.Plan == "Max 20x", "Expired logins must not be sent or refreshed.");
-                Fixture.Check(File.ReadAllText(Path.Combine(fixture.Store.ProfileDirectory(profile.Id), ".credentials.json")).Contains("synthetic-refresh", StringComparison.Ordinal), "The saved login changed.");
+                Fixture.Check(report.Status == UsageStatus.Expired && handler.Calls == 1 && report.Plan == "Max 20x", "An expired login that could not be renewed must not be sent: " + report.Message);
+                Fixture.Check(report.Message.Contains("could not renew", StringComparison.Ordinal) && !report.Message.Contains("synthetic", StringComparison.Ordinal), "The failure was not explained safely: " + report.Message);
+                Fixture.Check(Saved(fixture, profile) == before, "A failed renewal changed the saved login.");
+            });
+            Add("ClaudeExpiringLoginIsRenewed", async (fixture, cancellationToken) =>
+            {
+                Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddMinutes(10));
+                FakeKeychain keychain = new FakeKeychain();
+                List<string> requests = new List<string>();
+                FakeHttpHandler handler = new FakeHttpHandler(request =>
+                {
+                    if (request.RequestUri == _TokenEndpoint)
+                    {
+                        requests.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                        return Json(HttpStatusCode.OK, _Renewed);
+                    }
+                    return request.Headers.Authorization?.Parameter == "renewed-access" ? Json(HttpStatusCode.OK, "{\"five_hour\":{\"utilization\":10,\"resets_at\":null}}") : Json(HttpStatusCode.Unauthorized, "{}");
+                });
+                DateTimeOffset started = DateTimeOffset.UtcNow;
+                UsageReport report = await Service(fixture, handler, keychain).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(report.Status == UsageStatus.Available && report.Windows.Count == 1, "Usage was not read with the renewed login: " + report.Message);
+                JsonNode sent = JsonNode.Parse(requests.Single())!;
+                Fixture.Check(sent["grant_type"]!.GetValue<string>() == "refresh_token" && sent["refresh_token"]!.GetValue<string>() == "synthetic-refresh"
+                    && sent["client_id"]!.GetValue<string>() == "9d1c250a-e61b-44d9-88ed-5944d1962f5e" && sent["scope"]!.GetValue<string>() == "user:inference user:profile", "The refresh request is wrong.");
+                JsonNode oauth = JsonNode.Parse(Saved(fixture, profile))!["claudeAiOauth"]!;
+                long expires = oauth["expiresAt"]!.GetValue<long>();
+                Fixture.Check(oauth["accessToken"]!.GetValue<string>() == "renewed-access" && oauth["refreshToken"]!.GetValue<string>() == "renewed-refresh", "The rotated tokens were not saved.");
+                Fixture.Check(expires >= started.AddHours(8).ToUnixTimeMilliseconds() && expires <= DateTimeOffset.UtcNow.AddHours(8).ToUnixTimeMilliseconds() && oauth["refreshTokenExpiresAt"] != null, "The new expiry was not saved.");
+                Fixture.Check(oauth["subscriptionType"]!.GetValue<string>() == "max" && oauth["rateLimitTier"]!.GetValue<string>() == "default_claude_max_20x", "Renewal dropped other login fields.");
+                string service = MacCredentialBridge.ServiceName(fixture.Store.ProfileDirectory(profile.Id));
+                Fixture.Check(keychain.Writes == 1 && keychain.Items[service] == Saved(fixture, profile), "The renewed login was not saved to the Keychain.");
+                await Service(fixture, handler, keychain).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(requests.Count == 1, "A fresh login was renewed again.");
+            });
+            Add("ClaudeRenewalLeavesProfileInUseAlone", async (fixture, cancellationToken) =>
+            {
+                Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddMinutes(-5));
+                string before = Saved(fixture, profile);
+                FakeHttpHandler handler = new FakeHttpHandler(_ => throw new InvalidOperationException("Network must not be used."));
+                using (FileStream session = fixture.Store.AcquireSessionLease(profile.Id))
+                {
+                    UsageReport report = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                    Fixture.Check(report.Status == UsageStatus.Expired && report.Message.Contains("session", StringComparison.Ordinal), "A profile in use should be left to its session: " + report.Message);
+                }
+                Fixture.Check(handler.Calls == 0 && Saved(fixture, profile) == before, "Kameo renewed a login while a session was using it.");
+            });
+            Add("ClaudeRejectedRenewalAsksToSignIn", async (fixture, cancellationToken) =>
+            {
+                Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddMinutes(-5));
+                string before = Saved(fixture, profile);
+                FakeHttpHandler handler = new FakeHttpHandler(_ => Json(HttpStatusCode.BadRequest, "{\"error\":\"invalid_grant\",\"error_description\":\"synthetic-refresh revoked\"}"));
+                UsageReport report = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(report.Status == UsageStatus.Expired && report.Message.Contains("Sign in again", StringComparison.Ordinal) && !report.Message.Contains("synthetic", StringComparison.Ordinal), "A revoked login should ask to sign in: " + report.Message);
+                Fixture.Check(handler.Calls == 1 && Saved(fixture, profile) == before, "A rejected renewal changed the login or checked usage.");
+            });
+            Add("ClaudeMalformedRenewalKeepsLogin", async (fixture, cancellationToken) =>
+            {
+                Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddMinutes(-5));
+                string before = Saved(fixture, profile);
+                foreach (string body in new[] { "{\"access_token\":\"\",\"expires_in\":28800}", "{\"access_token\":\"renewed-access\"}", "not json", "[]" })
+                {
+                    FakeKeychain keychain = new FakeKeychain();
+                    UsageReport report = await Service(fixture, new FakeHttpHandler(_ => Json(HttpStatusCode.OK, body)), keychain).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                    Fixture.Check(report.Status == UsageStatus.Expired && Saved(fixture, profile) == before && keychain.Writes == 0, "A malformed renewal response changed the login: " + body);
+                }
+            });
+            Add("ClaudeUnauthorizedLoginIsRenewedOnce", async (fixture, cancellationToken) =>
+            {
+                Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddHours(4));
+                int renewals = 0;
+                int checks = 0;
+                bool acceptRenewed = true;
+                FakeHttpHandler handler = new FakeHttpHandler(request =>
+                {
+                    // Each renewal issues a new access token, so a rejected renewal is distinguishable from a stale one.
+                    if (request.RequestUri == _TokenEndpoint) { renewals++; return Json(HttpStatusCode.OK, renewals == 1 ? _Renewed : _Renewed.Replace("renewed-access", "second-access", StringComparison.Ordinal)); }
+                    checks++;
+                    return acceptRenewed && request.Headers.Authorization?.Parameter == "renewed-access" ? Json(HttpStatusCode.OK, "{\"seven_day\":{\"utilization\":5,\"resets_at\":null}}") : Json(HttpStatusCode.Unauthorized, "{}");
+                });
+                UsageReport report = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(report.Status == UsageStatus.Available && renewals == 1 && checks == 2, "A rejected login should be renewed and checked again once: " + report.Message);
+                acceptRenewed = false;
+                UsageReport rejected = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(rejected.Status == UsageStatus.Expired && renewals == 2 && checks == 4, "A login rejected after renewal must stop after one retry.");
+            });
+            Add("ClaudeRenewalUsesNewestKeychainLogin", async (fixture, cancellationToken) =>
+            {
+                Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddHours(-1));
+                string directory = fixture.Store.ProfileDirectory(profile.Id);
+                FakeKeychain keychain = new FakeKeychain();
+                keychain.Items[MacCredentialBridge.ServiceName(directory)] = "{\"claudeAiOauth\":{\"accessToken\":\"keychain-access\",\"refreshToken\":\"keychain-refresh\",\"expiresAt\":"
+                    + DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeMilliseconds() + ",\"clientId\":\"synthetic-client\"}}";
+                List<string> requests = new List<string>();
+                FakeHttpHandler handler = new FakeHttpHandler(request =>
+                {
+                    if (request.RequestUri != _TokenEndpoint) return Json(HttpStatusCode.OK, "{}");
+                    requests.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                    return Json(HttpStatusCode.OK, _Renewed);
+                });
+                await Service(fixture, handler, keychain).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                JsonNode sent = JsonNode.Parse(requests.Single())!;
+                Fixture.Check(sent["refresh_token"]!.GetValue<string>() == "keychain-refresh" && sent["client_id"]!.GetValue<string>() == "synthetic-client" && sent["scope"] == null, "Renewal did not use the newest Keychain login and its client.");
+                Fixture.Check(keychain.Items[MacCredentialBridge.ServiceName(directory)] == Saved(fixture, profile) && Saved(fixture, profile).Contains("renewed-refresh", StringComparison.Ordinal), "The Keychain and file disagree after renewal.");
+            });
+            Add("ClaudeRenewalWithLockedKeychainChangesNothing", async (fixture, cancellationToken) =>
+            {
+                Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddMinutes(-5));
+                string before = Saved(fixture, profile);
+                FakeKeychain keychain = new FakeKeychain { Locked = true };
+                FakeHttpHandler handler = new FakeHttpHandler(_ => throw new InvalidOperationException("Network must not be used."));
+                UsageReport report = await Service(fixture, handler, keychain).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(report.Status == UsageStatus.Expired && handler.Calls == 0 && Saved(fixture, profile) == before && keychain.Writes == 0, "An unreadable Keychain must stop renewal, since it may hold a newer login.");
+            });
+            Add("ClaudeConcurrentChecksRenewOnce", async (fixture, cancellationToken) =>
+            {
+                Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddMinutes(10));
+                int renewals = 0;
+                FakeHttpHandler handler = new FakeHttpHandler(request =>
+                {
+                    if (request.RequestUri != _TokenEndpoint) return Json(HttpStatusCode.OK, "{\"five_hour\":{\"utilization\":1,\"resets_at\":null}}");
+                    Interlocked.Increment(ref renewals);
+                    Thread.Sleep(200);
+                    return Json(HttpStatusCode.OK, _Renewed);
+                });
+                UsageReport[] reports = await Task.WhenAll(Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken), Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken)).ConfigureAwait(false);
+                Fixture.Check(renewals == 1 && reports.All(report => report.Status == UsageStatus.Available), "Concurrent checks renewed twice, which would invalidate the first rotated token.");
             });
             Add("ClaudeRejectedLoginIsExpired", async (fixture, cancellationToken) =>
             {
@@ -250,7 +377,10 @@ namespace Test.Shared
             return new TestSuiteDescriptor("Usage", "Claude Code and Codex plan usage without contacting providers", cases);
         }
 
-        private static UsageService Service(Fixture fixture, FakeHttpHandler handler) => new UsageService(fixture.Store, handler, _Endpoint, null, null);
+        private static UsageService Service(Fixture fixture, FakeHttpHandler handler, FakeKeychain? keychain = null) =>
+            new UsageService(fixture.Store, handler, _Endpoint, null, null, _TokenEndpoint, keychain ?? new FakeKeychain());
+
+        private static string Saved(Fixture fixture, Profile profile) => File.ReadAllText(Path.Combine(fixture.Store.ProfileDirectory(profile.Id), ".credentials.json"));
 
         private static HttpResponseMessage Json(HttpStatusCode status, string body) => new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 

@@ -9,8 +9,9 @@ namespace Kameo.Core
     using System.Threading.Tasks;
 
     /// <summary>
-    /// Reads subscription plan limits for native Claude Code and Codex profiles. Checks use each profile's saved login
-    /// without refreshing or rewriting it, and never log credentials. Instances are safe for concurrent callers.
+    /// Reads subscription plan limits for native Claude Code and Codex profiles, and never logs credentials. A Claude Code
+    /// sign-in that is about to expire is renewed when no session is using its profile; Codex renews its own. Instances
+    /// are safe for concurrent callers.
     /// </summary>
     public sealed class UsageService
     {
@@ -18,17 +19,23 @@ namespace Kameo.Core
         private readonly ProfileStore _Store;
         private readonly HttpClient _Client;
         private readonly Uri _ClaudeEndpoint;
+        private readonly Uri _TokenEndpoint;
+        private readonly IClaudeKeychain? _Keychain;
         private readonly TimeProvider _Clock;
         private readonly TimeSpan _CodexTimeout;
 
         /// <summary>Creates a usage reader for a profile store.</summary>
-        public UsageService(ProfileStore store) : this(store, null, null, null, null) { }
+        public UsageService(ProfileStore store) : this(store, null, null, null, null, null, OperatingSystem.IsMacOS() ? new SecurityKeychain() : null) { }
 
-        internal UsageService(ProfileStore store, HttpMessageHandler? handler, Uri? claudeEndpoint, TimeProvider? clock, TimeSpan? codexTimeout)
+        /// <summary>Creates a usage reader with substitutes. A null keychain reads and renews Claude logins in the profile file only.</summary>
+        internal UsageService(ProfileStore store, HttpMessageHandler? handler, Uri? claudeEndpoint, TimeProvider? clock, TimeSpan? codexTimeout,
+            Uri? tokenEndpoint = null, IClaudeKeychain? keychain = null)
         {
             _Store = store ?? throw new ArgumentNullException(nameof(store));
             _Client = handler == null ? _SharedClient.Value : new HttpClient(handler, false) { Timeout = Timeout.InfiniteTimeSpan };
             _ClaudeEndpoint = claudeEndpoint ?? ClaudeUsage.DefaultEndpoint;
+            _TokenEndpoint = tokenEndpoint ?? ClaudeTokenRefresh.DefaultEndpoint;
+            _Keychain = keychain;
             _Clock = clock ?? TimeProvider.System;
             _CodexTimeout = codexTimeout ?? CodexUsage.LiveTimeout;
         }
@@ -58,7 +65,7 @@ namespace Kameo.Core
 
         /// <summary>Checks one profile. Failures are returned as reports with a display-safe message rather than thrown.</summary>
         /// <param name="id">Profile identifier.</param>
-        /// <param name="offline">True to use only local data: Codex session logs. No network or child process is used.</param>
+        /// <param name="offline">True to use only local data: Codex session logs. No network or child process is used, and nothing is renewed.</param>
         /// <param name="cancellationToken">Cancels the check.</param>
         /// <exception cref="KeyNotFoundException">The profile does not exist.</exception>
         public async Task<UsageReport> ReadAsync(string id, bool offline, CancellationToken cancellationToken)
@@ -73,7 +80,7 @@ namespace Kameo.Core
             try
             {
                 return profile.Harness == HarnessKind.Claude
-                    ? await ClaudeUsage.ReadAsync(_Store, profile, _Client, _ClaudeEndpoint, now, offline, cancellationToken).ConfigureAwait(false)
+                    ? await ClaudeUsage.ReadAsync(_Store, profile, _Client, _ClaudeEndpoint, _TokenEndpoint, _Keychain, _Clock, offline, cancellationToken).ConfigureAwait(false)
                     : await CodexUsage.ReadAsync(_Store, profile, now, offline, _CodexTimeout, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }

@@ -101,7 +101,7 @@ namespace Test.Shared
             {
                 string directory = ClaudeDirectory(fixture);
                 WriteFile(directory, Claude("saved", 1000));
-                string? credential = await ClaudeUsage.ReadCredentialAsync(directory, cancellationToken).ConfigureAwait(false);
+                string? credential = await ClaudeUsage.ReadCredentialAsync(directory, new FakeKeychain(), cancellationToken).ConfigureAwait(false);
                 Fixture.Check(credential != null && MacCredentialBridge.Freshness(credential) == 1000, "Usage did not read the saved login.");
                 Fixture.Check(MacCredentialBridge.Freshness("{\"claudeAiOauth\":{\"accessToken\":\"\",\"refreshToken\":\"\",\"expiresAt\":5}}") == null
                     && MacCredentialBridge.Freshness("not json") == null && MacCredentialBridge.Freshness(null) == null, "Unusable logins were treated as usable.");

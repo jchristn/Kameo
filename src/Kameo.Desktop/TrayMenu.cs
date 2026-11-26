@@ -10,7 +10,8 @@ namespace Kameo.Desktop
 
     /// <summary>
     /// Builds the tray icon's native menu: About, management, and for each harness a Lowest usage launcher (Claude Code
-    /// and Codex with two or more native logins) and a submenu per profile with Launch, Launch in... and Use as default.
+    /// and Codex with two or more native logins) and a submenu per profile with Launch... and Use as default. Every launch
+    /// opens the launch options dialog, without the manager window unless a failure must be reported.
     /// </summary>
     internal sealed class TrayMenu
     {
@@ -53,9 +54,7 @@ namespace Kameo.Desktop
                 List<Profile> harnessProfiles = profiles.Where(profile => profile.Harness == harness).ToList();
                 if (MainWindow.OffersLowestUsage(harness, harnessProfiles))
                 {
-                    choices.Add(NativeMenus.Submenu("Lowest usage",
-                        NativeMenus.Item("Launch", () => _ = LaunchLowestAsync(harness)),
-                        NativeMenus.Item("Launch in...", () => { _Show(); _ = _Window.LaunchLowestAsync(harness, true, CancellationToken.None); })));
+                    choices.Add(NativeMenus.Item("Lowest usage...", () => _ = LaunchLowestAsync(harness)));
                     choices.Add(new NativeMenuItemSeparator());
                 }
                 foreach (Profile profile in harnessProfiles)
@@ -65,8 +64,7 @@ namespace Kameo.Desktop
                     use.IsChecked = profile.IsActive;
                     use.IsEnabled = !profile.IsActive;
                     NativeMenuItem item = NativeMenus.Submenu(profile.Name,
-                        NativeMenus.Item("Launch", () => Launch(profile.Id)),
-                        NativeMenus.Item("Launch in...", () => LaunchIn(profile.Id)),
+                        NativeMenus.Item("Launch...", () => _ = LaunchAsync(profile.Id)),
                         new NativeMenuItemSeparator(),
                         use);
                     // The tick marks the profile that kameo commands and other launch shortcuts use.
@@ -87,22 +85,15 @@ namespace Kameo.Desktop
             _Window.ShowAbout();
         }
 
-        private void Launch(string id)
+        private async Task LaunchAsync(string id)
         {
-            // Launch without opening the manager; show it only so a failure message is visible.
-            if (!_Window.LaunchProfile(id)) _Show();
-        }
-
-        private void LaunchIn(string id)
-        {
-            // The folder picker belongs to the manager window, so it must be visible first.
-            _Show();
-            _Window.LaunchProfileIn(id);
+            // Only the options dialog appears; the manager is shown only so a failure message is visible.
+            if (!await _Window.LaunchProfileAsync(id, CancellationToken.None)) _Show();
         }
 
         private async Task LaunchLowestAsync(HarnessKind harness)
         {
-            if (!await _Window.LaunchLowestAsync(harness, false, CancellationToken.None)) _Show();
+            if (!await _Window.LaunchLowestAsync(harness, CancellationToken.None)) _Show();
         }
 
         private void Select(Profile profile)

@@ -59,36 +59,62 @@ namespace Test.Desktop
                 string chosen = Directory.CreateDirectory(Path.Combine(store.Root, "Chosen")).FullName;
                 store.SetPreference("workspace", store.Root);
                 List<string> launches = new List<string>();
-                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(chosen), (id, login, directory) => { Check(!login, "Launch started a login."); launches.Add(id + "@" + directory); });
+                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(chosen), request =>
+                {
+                    Check(!request.Login && request.Arguments.Count == 0, "Launch started a login or added arguments.");
+                    launches.Add(request.ProfileId + "@" + request.WorkingDirectory);
+                });
                 try
                 {
                     window.Show(); Sync(window);
-                    Button[] launchButtons = window.GetVisualDescendants().OfType<Button>().Where(button => button.Content as string == "Launch").ToArray();
-                    Button[] launchInButtons = window.GetVisualDescendants().OfType<Button>().Where(button => button.Content as string == "Launch in...").ToArray();
-                    Check(launchButtons.Length == 2 && launchInButtons.Length == 2, "Each profile card needs Launch and Launch in....");
-                    Click(launchButtons[0]); Click(launchButtons[1]); Click(launchInButtons[0]);
+                    Button[] LaunchButtons() => window.GetVisualDescendants().OfType<Button>().Where(button => button.Content as string == "Launch").ToArray();
+                    Check(LaunchButtons().Length == 2 && !window.GetVisualDescendants().OfType<Button>().Any(button => button.Content as string == "Launch in..."), "Each profile card needs one Launch button, which replaces Launch in....");
+                    Click(LaunchButtons()[0]); Check(Dialog(window).Title == "Launch Personal" && Field(Dialog(window), "LaunchFolder").Text == store.Root, "The dialog should name the profile and propose the saved folder.");
+                    Confirm(window);
+                    Click(LaunchButtons()[1]); Confirm(window);
+                    Click(LaunchButtons()[0]); Field(Dialog(window), "LaunchFolder").Text = chosen; Confirm(window);
                     Check(launches.SequenceEqual(new[] { personal.Id + "@" + store.Root, work.Id + "@" + store.Root, personal.Id + "@" + chosen }), "Card launches used the wrong profile or folder: " + string.Join(", ", launches));
                     Check(store.Selected(HarnessKind.Claude).Id == work.Id && store.Preference("workspace") == store.Root, "Launching a card changed the selection or saved folder.");
                 }
                 finally { window.Close(); }
             });
-            Add("LaunchInPreservesDefaultFolder", (_, store) =>
+            Add("LaunchDialogChoosesFolderAndPermission", (_, store) =>
             {
                 string chosen = Directory.CreateDirectory(Path.Combine(store.Root, "Project with spaces")).FullName;
                 WithLaunchWindow(store, _ => Task.FromResult<string?>(chosen), (window, launches) =>
                 {
-                    Check(Button(window, "Launch in...").IsEnabled, "Launch in should be available for a selected profile.");
-                    Click(Button(window, "Launch in..."));
-                    Check(launches.SequenceEqual(new[] { chosen }), "Launch in did not use the chosen directory exactly once.");
-                    Check(store.Preference("workspace") == store.Root, "Launch in changed the saved launch folder.");
                     Click(Button(window, "Launch"));
-                    Check(launches.SequenceEqual(new[] { chosen, store.Root }), "Normal Launch did not retain its default folder.");
+                    LaunchOptionsWindow dialog = Dialog(window);
+                    ComboBox permission = Combo(dialog, "PermissionMode");
+                    Check(permission.Items.Cast<string>().SequenceEqual(LaunchPermissions.For(HarnessKind.Claude).Select(level => level.Label)) && permission.SelectedIndex == 0, "The dialog should list Claude's permission levels, starting at the default.");
+                    Check(!Text(dialog).Contains("without asking. Use only", StringComparison.Ordinal), "The default level should not warn.");
+                    Click(Button(dialog, "Browse..."));
+                    Check(Field(dialog, "LaunchFolder").Text == chosen, "Browse did not fill in the chosen folder.");
+                    permission.SelectedIndex = permission.Items.Cast<string>().ToList().IndexOf("Skip all permission prompts"); Dispatcher.UIThread.RunJobs();
+                    Check(Text(dialog).Contains("--dangerously-skip-permissions", StringComparison.Ordinal) && Text(dialog).Contains("Use only in a sandbox", StringComparison.Ordinal), "The bypass level should name its flag and warn.");
+                    Confirm(window);
+                    Check(launches.Count == 1 && launches[0].WorkingDirectory == chosen && launches[0].Arguments.SequenceEqual(new[] { "--dangerously-skip-permissions" }), "The launch did not use the chosen folder and permission flag.");
+                    Check(store.Preference("workspace") == store.Root && store.Preference("launch-permission-claude") == "bypass", "The folder should stay unsaved and the permission level remembered.");
+                    Check(Text(window).Contains("Launched Launch test (Skip all permission prompts).", StringComparison.Ordinal), "The launch was not confirmed with its permission level.");
+                    Click(Button(window, "Launch")); dialog = Dialog(window);
+                    Check(Field(dialog, "LaunchFolder").Text == store.Root && Combo(dialog, "PermissionMode").SelectedItem as string == "Skip all permission prompts", "The next launch should propose the saved folder and the remembered level.");
+                    Combo(dialog, "PermissionMode").SelectedIndex = 1;
+                    Field(dialog, "LaunchFolder").Text = chosen;
+                    dialog.GetVisualDescendants().OfType<CheckBox>().Single(box => box.Name == "SaveFolder").IsChecked = true;
+                    Confirm(window);
+                    Check(launches[1].Arguments.SequenceEqual(new[] { "--permission-mode", "acceptEdits" }) && store.Preference("launch-permission-claude") == "accept-edits", "Changing the level did not apply or was not remembered.");
+                    Check(store.Preference("workspace") == chosen && window.GetVisualDescendants().OfType<Button>().Any(button => button.Content as string == "Project with spaces..."), "Saving the folder did not update the default and sidebar.");
                 });
             });
-            Add("LaunchInCancelDoesNotLaunch", (_, store) => WithLaunchWindow(store, _ => Task.FromResult<string?>(null), (window, launches) =>
+            Add("LaunchDialogCancelDoesNotLaunch", (_, store) => WithLaunchWindow(store, _ => Task.FromResult<string?>(null), (window, launches) =>
             {
-                Click(Button(window, "Launch in..."));
-                Check(launches.Count == 0 && store.Preference("workspace") == store.Root, "Cancel launched a session or changed the saved folder.");
+                Click(Button(window, "Launch"));
+                Combo(Dialog(window), "PermissionMode").SelectedIndex = 4;
+                Click(Button(Dialog(window), "Browse..."));
+                Click(Button(Dialog(window), "Cancel"));
+                Check(window.ActiveLaunchOptions == null && launches.Count == 0, "Cancel launched a session or left the dialog open.");
+                Click(Button(window, "Launch")); Dialog(window).Close(); Dispatcher.UIThread.RunJobs();
+                Check(launches.Count == 0 && store.Preference("workspace") == store.Root && store.Preference("launch-permission-claude") == null, "Closing the dialog launched or saved choices.");
             }));
             Add("SidebarFolderStillUpdatesDefault", (_, store) =>
             {
@@ -97,31 +123,44 @@ namespace Test.Desktop
                 {
                     Click(Button(window, Path.GetFileName(store.Root) + "..."));
                     Check(launches.Count == 0 && store.Preference("workspace") == chosen, "The sidebar folder picker did not save the default without launching.");
-                    Click(Button(window, "Launch"));
-                    Check(launches.SequenceEqual(new[] { chosen }), "Launch did not use the updated sidebar folder.");
+                    Click(Button(window, "Launch")); Confirm(window);
+                    Check(launches.Select(launch => launch.WorkingDirectory).SequenceEqual(new[] { chosen }), "Launch did not propose the updated sidebar folder.");
                 });
             });
-            Add("LaunchInPickerFailureIsReported", (_, store) => WithLaunchWindow(store,
+            Add("LaunchDialogPickerFailureIsReported", (_, store) => WithLaunchWindow(store,
                 _ => Task.FromException<string?>(new IOException("Folder picker unavailable.")), (window, launches) =>
             {
-                Click(Button(window, "Launch in..."));
-                Check(launches.Count == 0 && Text(window).Contains("Folder picker unavailable.", StringComparison.Ordinal), "Picker failure escaped or was not reported.");
-                Check(store.Preference("workspace") == store.Root, "Picker failure changed the saved folder.");
+                Click(Button(window, "Launch")); Click(Button(Dialog(window), "Browse..."));
+                Check(launches.Count == 0 && Text(Dialog(window)).Contains("Folder picker unavailable.", StringComparison.Ordinal), "Picker failure escaped or was not reported in the dialog.");
+                Check(Field(Dialog(window), "LaunchFolder").Text == store.Root, "Picker failure changed the proposed folder.");
             }));
-            Add("LaunchInMissingFolderDoesNotLaunch", (_, store) => WithLaunchWindow(store,
-                _ => Task.FromResult<string?>(Path.Combine(store.Root, "removed-folder")), (window, launches) =>
+            Add("LaunchDialogRejectsMissingFolder", (_, store) => WithLaunchWindow(store, _ => Task.FromResult<string?>(null), (window, launches) =>
             {
-                Click(Button(window, "Launch in..."));
-                Check(launches.Count == 0 && Text(window).Contains("no longer available", StringComparison.Ordinal), "A missing folder was accepted or lacks a useful error.");
-                Check(store.Preference("workspace") == store.Root, "A missing folder changed the saved folder.");
+                Click(Button(window, "Launch"));
+                Field(Dialog(window), "LaunchFolder").Text = Path.Combine(store.Root, "removed-folder"); Click(Button(Dialog(window), "Launch"));
+                Check(launches.Count == 0 && window.ActiveLaunchOptions != null && Text(Dialog(window)).Contains("does not exist", StringComparison.Ordinal), "A missing folder was accepted or lacks a useful error.");
+                Field(Dialog(window), "LaunchFolder").Text = " "; Click(Button(Dialog(window), "Launch"));
+                Check(launches.Count == 0 && Text(Dialog(window)).Contains("Choose a folder", StringComparison.Ordinal), "An empty folder was accepted.");
+                Check(store.Preference("workspace") == store.Root, "A rejected folder changed the saved folder.");
             }));
-            Add("LaunchInTerminalFailureIsReported", (_, store) => WithLaunchWindow(store,
-                _ => Task.FromResult<string?>(store.Root), (window, launches) =>
+            Add("LaunchTerminalFailureIsReported", (_, store) => WithLaunchWindow(store, _ => Task.FromResult<string?>(store.Root), (window, launches) =>
             {
-                Click(Button(window, "Launch in..."));
+                Click(Button(window, "Launch"));
+                Combo(Dialog(window), "PermissionMode").SelectedIndex = 4;
+                Dialog(window).GetVisualDescendants().OfType<CheckBox>().Single(box => box.Name == "SaveFolder").IsChecked = true;
+                Field(Dialog(window), "LaunchFolder").Text = Directory.CreateDirectory(Path.Combine(store.Root, "Other")).FullName;
+                Confirm(window);
                 Check(Text(window).Contains("No test terminal available.", StringComparison.Ordinal), "Terminal failure was not reported.");
-                Check(store.Preference("workspace") == store.Root, "Terminal failure changed the saved folder.");
+                Check(store.Preference("workspace") == store.Root && store.Preference("launch-permission-claude") == null, "A failed launch saved its choices.");
             }, failLaunch: true));
+            Add("OneLaunchDialogAtATime", (_, store) => WithLaunchWindow(store, _ => Task.FromResult<string?>(null), (window, launches) =>
+            {
+                Click(Button(window, "Launch")); LaunchOptionsWindow first = Dialog(window);
+                Check(window.LaunchProfileAsync(store.Selected(HarnessKind.Claude).Id, CancellationToken.None).IsCompletedSuccessfully, "A second launch should return at once.");
+                Check(window.OwnedWindows.OfType<LaunchOptionsWindow>().Count() == 1 && ReferenceEquals(window.ActiveLaunchOptions, first), "A second launch opened another dialog.");
+                Confirm(window);
+                Check(launches.Count == 1, "The open dialog did not launch exactly once.");
+            }));
             Add("CompactLayoutHasNoUnwantedFooter", (window, store) => Check(window.Width <= 800 && window.Height <= 550 && !Text(window).Contains("Stored on this device", StringComparison.Ordinal) && !window.GetVisualDescendants().OfType<Button>().Any(button => button.Content as string == "Quit Kameo"), "The compact layout regressed."));
             Add("NativeMenuBarIsComplete", (window, store) =>
             {
@@ -148,24 +187,24 @@ namespace Test.Desktop
                 store.SetPreference("workspace", store.Root);
                 List<string> launches = new List<string>();
                 MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root),
-                    (id, login, directory) => { Check(!login && directory == store.Root, "Menu launch used the wrong mode or folder."); launches.Add(id); });
+                    request => { Check(!request.Login && request.WorkingDirectory == store.Root, "Menu launch used the wrong mode or folder."); launches.Add(request.ProfileId); });
                 try
                 {
                     window.Show();
                     foreach (HarnessKind harness in HarnessCatalog.All)
                     {
                         NativeMenu choices = HarnessMenu(window, harness);
-                        Check(!((NativeMenuItem)choices.Items[0]).IsEnabled && !((NativeMenuItem)choices.Items[1]).IsEnabled, "An empty harness can launch.");
+                        Check(choices.Items.Count == 3 && !((NativeMenuItem)choices.Items[0]).IsEnabled && choices.Items[1] is NativeMenuItemSeparator, "An empty harness can launch, or the menu has a separate Launch in... item.");
                         Profile first = store.Create(new Profile { Harness = harness, Name = "First", Kind = CredentialKind.Native });
                         Profile second = store.Create(new Profile { Harness = harness, Name = "Second", Kind = CredentialKind.Native });
                         window.Refresh(); Check(ReferenceEquals(choices, HarnessMenu(window, harness)), "Native submenu was replaced.");
-                        Click((NativeMenuItem)choices.Items[0]); Check(launches.Last() == first.Id, "Menu launched another harness or profile.");
+                        Check(((NativeMenuItem)choices.Items[0]).Header == "Launch First...", "The menu should say Launch opens options.");
+                        Click((NativeMenuItem)choices.Items[0]); Confirm(window); Check(launches.Last() == first.Id, "Menu launched another harness or profile.");
                         store.Select(second.Id);
                         // Resolve selection when invoked, even before the periodic UI refresh.
-                        Click((NativeMenuItem)choices.Items[0]); Check(launches.Last() == second.Id, "Menu launched a stale selection.");
-                        window.RefreshIfChanged(); Check(((NativeMenuItem)choices.Items[0]).Header == "Launch Second", "Selection label did not refresh.");
-                        Click((NativeMenuItem)choices.Items[1]); Check(launches.Last() == second.Id, "Menu Launch in used a different profile.");
-                        Click((NativeMenuItem)choices.Items[3]); Check(Title(window) == HarnessCatalog.Name(harness), "Manage profiles did not navigate.");
+                        Click((NativeMenuItem)choices.Items[0]); Confirm(window); Check(launches.Last() == second.Id, "Menu launched a stale selection.");
+                        window.RefreshIfChanged(); Check(((NativeMenuItem)choices.Items[0]).Header == "Launch Second...", "Selection label did not refresh.");
+                        Click((NativeMenuItem)choices.Items[2]); Check(Title(window) == HarnessCatalog.Name(harness), "Manage profiles did not navigate.");
                         store.Delete(second.Id); store.Delete(first.Id); window.RefreshIfChanged();
                         Check(!((NativeMenuItem)choices.Items[0]).IsEnabled, "Deleted profiles remain launchable.");
                     }
@@ -179,7 +218,7 @@ namespace Test.Desktop
                 List<string> folders = new List<string>();
                 Dictionary<string, double> usage = new Dictionary<string, double>();
                 MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root),
-                    (id, login, directory) => { Check(!login, "Tray launch used login mode."); launches.Add(id); folders.Add(directory); },
+                    request => { Check(!request.Login, "Tray launch used login mode."); launches.Add(request.ProfileId); folders.Add(request.WorkingDirectory); },
                     (id, token) => Task.FromResult(usage.TryGetValue(id, out double used)
                         ? new UsageReport { ProfileId = id, Status = UsageStatus.Available, Source = UsageSource.Live, Windows = new[] { new UsageWindow("Weekly", used, null, 10080) } }
                         : new UsageReport { ProfileId = id, Status = UsageStatus.SignedOut, Message = "Sign in." }));
@@ -206,14 +245,24 @@ namespace Test.Desktop
                         Check(choices.Items.OfType<NativeMenuItem>().Select(item => item.Header).SequenceEqual(new[] { "First", "Second" }), "Each profile should be its own submenu, without a separate launch item.");
                         NativeMenuItem firstItem = Child(choices, "First");
                         Check(firstItem.IsChecked && !Child(choices, "Second").IsChecked, "The selected profile should be ticked.");
-                        Check(firstItem.Menu!.Items.OfType<NativeMenuItem>().Where(item => item is not NativeMenuItemSeparator).Select(item => item.Header).SequenceEqual(new[] { "Launch", "Launch in...", "Use as default" }), "A profile submenu should offer Launch, Launch in... and Use as default.");
+                        Check(firstItem.Menu!.Items.OfType<NativeMenuItem>().Where(item => item is not NativeMenuItemSeparator).Select(item => item.Header).SequenceEqual(new[] { "Launch...", "Use as default" }), "A profile submenu should offer Launch... and Use as default.");
                         Check(!Child(firstItem.Menu!, "Use as default").IsEnabled && Child(firstItem.Menu!, "Use as default").IsChecked, "The default profile's Use as default should be ticked and disabled.");
                         int shownBefore = shown;
-                        Click(Child(firstItem.Menu!, "Launch")); Check(launches.Last() == first.Id && folders.Last() == store.Root && shown == shownBefore, "Tray launch used the wrong profile or folder, or opened the manager.");
+                        Click(Child(firstItem.Menu!, "Launch...")); Confirm(window);
+                        Check(launches.Last() == first.Id && folders.Last() == store.Root && shown == shownBefore, "Tray launch used the wrong profile or folder, or opened the manager.");
                         NativeMenu secondMenu = Child(choices, "Second").Menu!;
-                        Click(Child(secondMenu, "Launch")); Check(launches.Last() == second.Id && store.Selected(harness).Id == first.Id, "Launching a profile should not change the default.");
-                        Click(Child(secondMenu, "Launch in...")); await Task.Delay(10, cancellationToken);
-                        Check(launches.Last() == second.Id && shown > shownBefore, "Tray Launch in did not use the manager's folder picker.");
+                        Click(Child(secondMenu, "Launch...")); Confirm(window); Check(launches.Last() == second.Id && store.Selected(harness).Id == first.Id, "Launching a profile should not change the default.");
+                        int launched = launches.Count;
+                        Click(Child(secondMenu, "Launch...")); Click(Button(Dialog(window), "Cancel"));
+                        Check(launches.Count == launched && shown == shownBefore, "Canceling a tray launch started a session or opened the manager.");
+                        // Hidden in the tray: the dialog appears on its own, without the manager.
+                        window.Hide();
+                        Click(Child(secondMenu, "Launch..."));
+                        LaunchOptionsWindow standalone = window.ActiveLaunchOptions ?? throw new InvalidOperationException("The tray did not open launch options while the manager was hidden.");
+                        Check(standalone.Owner == null && standalone.IsVisible && !window.IsVisible && shown == shownBefore, "The hidden-manager dialog should stand alone without showing the manager.");
+                        Click(Button(standalone, "Launch"));
+                        Check(launches.Count == launched + 1 && launches.Last() == second.Id, "The standalone dialog did not launch.");
+                        window.Show();
                         Click(Child(secondMenu, "Use as default")); Check(store.Selected(harness).Id == second.Id, "Use as default did not change the profile.");
                         choices = Top(HarnessCatalog.Name(harness)).Menu!;
                         Check(Child(choices, "Second").IsChecked && !Child(choices, "First").IsChecked, "The tick did not follow the default.");
@@ -221,16 +270,17 @@ namespace Test.Desktop
                         tray.Refresh(); choices = Top(HarnessCatalog.Name(harness)).Menu!;
                         if (HarnessCatalog.SupportsUsage(harness))
                         {
-                            Check(choices.Items[0] is NativeMenuItem { Header: "Lowest usage" } && choices.Items[1] is NativeMenuItemSeparator, "Lowest usage should come first, then a separator.");
-                            NativeMenu lowest = ((NativeMenuItem)choices.Items[0]).Menu!;
-                            Check(lowest.Items.OfType<NativeMenuItem>().Select(item => item.Header).SequenceEqual(new[] { "Launch", "Launch in..." }), "Lowest usage should offer Launch and Launch in....");
+                            Check(choices.Items[0] is NativeMenuItem { Header: "Lowest usage...", Menu: null } && choices.Items[1] is NativeMenuItemSeparator, "Lowest usage... should come first as one item, then a separator.");
+                            NativeMenuItem lowest = (NativeMenuItem)choices.Items[0];
                             usage[first.Id] = 70; usage[third.Id] = 20;
-                            Click(Child(lowest, "Launch")); await Task.Delay(20, cancellationToken);
+                            Click(lowest); await Task.Delay(20, cancellationToken);
+                            Check(Dialog(window).Title == "Launch Third", "Lowest usage should open options for the native login with the most headroom.");
+                            Confirm(window);
                             Check(launches.Last() == third.Id && folders.Last() == store.Root && store.Selected(harness).Id == second.Id, "Lowest usage should launch the native login with the most headroom.");
                             usage[first.Id] = 5;
                             await window.CheckUsageAsync(harness, true, cancellationToken);
-                            Click(Child(lowest, "Launch in...")); await Task.Delay(20, cancellationToken);
-                            Check(launches.Last() == first.Id, "Lowest usage Launch in... should launch the lowest login through the folder picker.");
+                            Click(lowest); await Task.Delay(20, cancellationToken); Confirm(window);
+                            Check(launches.Last() == first.Id, "Lowest usage should follow refreshed usage.");
                         }
                         else Check(!choices.Items.OfType<NativeMenuItem>().Any(item => item.Header == "Lowest usage"), HarnessCatalog.Name(harness) + " has no usage, so it should not offer Lowest usage.");
                         store.Delete(second.Id); store.Delete(first.Id); store.Delete(third.Id); tray.Refresh();
@@ -381,7 +431,7 @@ namespace Test.Desktop
                 Field(editor, "ProfileName").Text = "Google Work"; Click(Button(editor, "Save profile")); window.Refresh();
                 Profile profile = store.Selected(HarnessKind.Antigravity);
                 Check(profile.Kind == CredentialKind.Native && !profile.HasNativeCredential, "A Google account requires an API key or was shown as authenticated before sign-in.");
-                Check(Button(window, "Sign in").IsVisible && Button(window, "Launch").IsEnabled && Button(window, "Launch in...").IsEnabled, "Account actions are unavailable.");
+                Check(Button(window, "Sign in").IsVisible && Button(window, "Launch").IsEnabled, "Account actions are unavailable.");
                 new CredentialFiles(store).ImportText(profile.Id, "{\"auth_method\":\"consumer\",\"token\":{\"access_token\":\"synthetic\",\"refresh_token\":\"synthetic-refresh\"}}");
                 window.Refresh(); Check(Text(window).Contains("Google account saved", StringComparison.Ordinal), "Saved account status was not refreshed.");
                 Click(Button(window, "Edit")); editor = window.OwnedWindows.Single();
@@ -392,12 +442,14 @@ namespace Test.Desktop
             {
                 Profile profile = store.Create(new Profile { Harness = HarnessKind.Antigravity, Kind = CredentialKind.Native, Name = "Google Personal" });
                 store.SetPreference("workspace", store.Root); List<bool> logins = new List<bool>();
-                MainWindow window = new MainWindow(store, () => { }, () => { }, cancellationToken => Task.FromResult<string?>(store.Root), (id, login, directory) =>
-                { Check(id == profile.Id && directory == store.Root, "Account action used the wrong profile or folder."); logins.Add(login); });
+                MainWindow window = new MainWindow(store, () => { }, () => { }, cancellationToken => Task.FromResult<string?>(store.Root), request =>
+                { Check(request.ProfileId == profile.Id && request.WorkingDirectory == store.Root, "Account action used the wrong profile or folder."); logins.Add(request.Login); });
                 try
                 {
-                    window.Show(); Navigate(window, "Antigravity"); Click(Button(window, "Sign in")); Click(Button(window, "Launch")); Click(Button(window, "Launch in..."));
-                    Check(logins.SequenceEqual(new[] { true, false, false }), "Account actions did not distinguish login from launch.");
+                    window.Show(); Navigate(window, "Antigravity"); Click(Button(window, "Sign in")); Click(Button(window, "Launch"));
+                    Check(Combo(Dialog(window), "PermissionMode").Items.Cast<string>().SequenceEqual(LaunchPermissions.For(HarnessKind.Antigravity).Select(level => level.Label)), "The dialog should offer Antigravity's own permission levels.");
+                    Confirm(window);
+                    Check(logins.SequenceEqual(new[] { true, false }), "Account actions did not distinguish login from launch.");
                 }
                 finally { window.Close(); }
             });
@@ -409,7 +461,7 @@ namespace Test.Desktop
                 store.Create(new Profile { Harness = HarnessKind.Claude, Kind = CredentialKind.ApiKey, Name = "Claude Key", ApiKey = "synthetic" });
                 List<string> checkedIds = new List<string>();
                 TestClock clock = new TestClock();
-                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root), (id, login, directory) => { }, (id, token) =>
+                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root), _ => { }, (id, token) =>
                 {
                     checkedIds.Add(id);
                     UsageReport report = id == work.Id
@@ -461,7 +513,7 @@ namespace Test.Desktop
                 store.Create(new Profile { Harness = HarnessKind.Antigravity, Kind = CredentialKind.Native, Name = "Google Work" });
                 List<string> checkedIds = new List<string>();
                 TestClock clock = new TestClock();
-                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root), (id, login, directory) => { }, (id, token) =>
+                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root), _ => { }, (id, token) =>
                 {
                     checkedIds.Add(id);
                     return Task.FromResult(new UsageReport { ProfileId = id, Harness = id == claude.Id ? HarnessKind.Claude : HarnessKind.Codex, Status = UsageStatus.Expired, Message = "The saved sign-in has expired." });
@@ -498,7 +550,7 @@ namespace Test.Desktop
                 List<string> launches = new List<string>();
                 Dictionary<string, double[]> usage = new Dictionary<string, double[]> { [busy.Id] = new[] { 10.0, 80.0 }, [roomy.Id] = new[] { 60.0, 30.0 } };
                 TestClock clock = new TestClock();
-                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root), (id, login, directory) => launches.Add(id + "@" + directory), (id, token) =>
+                MainWindow window = new MainWindow(store, () => { }, () => { }, _ => Task.FromResult<string?>(store.Root), request => launches.Add(request.ProfileId + "@" + request.WorkingDirectory), (id, token) =>
                     Task.FromResult(usage.TryGetValue(id, out double[]? used)
                         ? new UsageReport { ProfileId = id, Harness = HarnessKind.Claude, Status = UsageStatus.Available, Source = UsageSource.Live, ObservedUtc = clock.Now,
                             Windows = new[] { new UsageWindow("5-hour", used[0], null, 300), new UsageWindow("Weekly", used[1], null, 10080) } }
@@ -507,16 +559,18 @@ namespace Test.Desktop
                 {
                     window.Show(); Sync(window);
                     Button lowest = Button(window, "Launch lowest usage");
-                    Check(ToolTip.GetTip(lowest) as string == "Launch Roomy (60% used at its tightest limit) in your launch folder.", "The tooltip should name the login with the most headroom.");
+                    Check(ToolTip.GetTip(lowest) as string == "Choose launch options for Roomy (60% used at its tightest limit).", "The tooltip should name the login with the most headroom.");
                     Click(lowest);
                     await Task.Delay(20, cancellationToken);
+                    Check(Dialog(window).Title == "Launch Roomy", "Lowest usage should open options for the login with the most headroom.");
+                    Confirm(window);
                     Check(launches.SequenceEqual(new[] { roomy.Id + "@" + store.Root }) && store.Selected(HarnessKind.Claude).Id == busy.Id, "Lowest usage should launch the login whose tightest limit is lowest, without changing the selection.");
                     Check(Text(window).Contains("Launched Roomy: 60% used at its tightest limit.", StringComparison.Ordinal), "The launch was not confirmed.");
                     usage.Clear();
                     clock.Now += TimeSpan.FromMinutes(16);
                     Click(Button(window, "Launch lowest usage"));
                     await Task.Delay(20, cancellationToken);
-                    Check(launches.Count == 1 && Text(window).Contains("No plan usage is available", StringComparison.Ordinal), "Stale usage should be rechecked, and nothing launched without usage.");
+                    Check(launches.Count == 1 && window.ActiveLaunchOptions == null && Text(window).Contains("No plan usage is available", StringComparison.Ordinal), "Stale usage should be rechecked, and nothing launched without usage.");
                 }
                 finally { window.Close(); }
             });
@@ -541,16 +595,16 @@ namespace Test.Desktop
         }
 
         private static void WithLaunchWindow(ProfileStore store, Func<CancellationToken, Task<string?>> pickFolder,
-            Action<MainWindow, List<string>> verify, bool failLaunch = false)
+            Action<MainWindow, List<LaunchRequest>> verify, bool failLaunch = false)
         {
             Profile profile = store.Create(new Profile { Harness = HarnessKind.Claude, Name = "Launch test", ApiKey = "synthetic" });
             store.SetPreference("workspace", store.Root);
-            List<string> launches = new List<string>();
-            MainWindow window = new MainWindow(store, () => { }, () => { }, pickFolder, (id, login, directory) =>
+            List<LaunchRequest> launches = new List<LaunchRequest>();
+            MainWindow window = new MainWindow(store, () => { }, () => { }, pickFolder, request =>
             {
-                Check(id == profile.Id && !login, "Launch in used the wrong profile or started login instead of a session.");
+                Check(request.ProfileId == profile.Id && !request.Login, "Launch used the wrong profile or started login instead of a session.");
                 if (failLaunch) throw new InvalidOperationException("No test terminal available.");
-                launches.Add(directory);
+                launches.Add(request);
             });
             try { window.Show(); Sync(window); verify(window, launches); }
             finally { window.Close(); }
@@ -559,6 +613,15 @@ namespace Test.Desktop
         private static Button Button(Window window, string label) { Sync(window); return window.GetVisualDescendants().OfType<Button>().Single(button => button.Content as string == label || Avalonia.Automation.AutomationProperties.GetName(button) == label); }
         private static void Navigate(MainWindow window, string harness) => Click(window.GetVisualDescendants().OfType<Button>().Single(button => button.Content is Grid grid && grid.Children.OfType<TextBlock>().Any(text => text.Text == harness)));
         private static TextBox Field(Window window, string name) { Sync(window); return window.GetVisualDescendants().OfType<TextBox>().Single(field => field.Name == name); }
+        private static ComboBox Combo(Window window, string name) { Sync(window); return window.GetVisualDescendants().OfType<ComboBox>().Single(box => box.Name == name); }
+        private static LaunchOptionsWindow Dialog(MainWindow window)
+        {
+            Dispatcher.UIThread.RunJobs();
+            LaunchOptionsWindow dialog = window.ActiveLaunchOptions ?? throw new InvalidOperationException("The launch options dialog did not open.");
+            Sync(dialog);
+            return dialog;
+        }
+        private static void Confirm(MainWindow window) => Click(Button(Dialog(window), "Launch"));
         private static string Text(Window window) { Sync(window); return string.Join("\n", window.GetVisualDescendants().OfType<TextBlock>().Select(text => text.Text)); }
         private static string? Title(Window window) { Sync(window); return window.GetVisualDescendants().OfType<TextBlock>().Single(text => text.Name == "HarnessTitle").Text; }
         private static void Sync(Window window) { window.UpdateLayout(); Dispatcher.UIThread.RunJobs(); window.UpdateLayout(); }

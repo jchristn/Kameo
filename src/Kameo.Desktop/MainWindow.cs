@@ -25,7 +25,8 @@ namespace Kameo.Desktop
         private readonly Action _Changed;
         private readonly Action _Quit;
         private readonly Func<CancellationToken, Task<string?>> _PickFolder;
-        private readonly Action<string, bool, string> _OpenTerminal;
+        private readonly Func<CancellationToken, Task<string?>>? _PickFolderOverride;
+        private readonly Action<LaunchRequest> _OpenTerminal;
         private readonly Func<string, CancellationToken, Task<UsageReport>> _ReadUsage;
         private readonly TimeProvider _Clock;
         private readonly Dictionary<string, UsageReport> _Usage = new Dictionary<string, UsageReport>();
@@ -51,6 +52,7 @@ namespace Kameo.Desktop
         private string _Fingerprint = "";
         private string _Workspace;
         private Bitmap? _Logo;
+        private LaunchOptionsWindow? _LaunchDialog;
         private readonly Dictionary<HarnessKind, NativeMenu> _HarnessMenus = new Dictionary<HarnessKind, NativeMenu>();
 
         /// <summary>Creates the manager for a local profile store.</summary>
@@ -58,14 +60,15 @@ namespace Kameo.Desktop
             : this(store, changed, quit, null, null) { }
 
         internal MainWindow(ProfileStore store, Action changed, Action quit,
-            Func<CancellationToken, Task<string?>>? pickFolder, Action<string, bool, string>? openTerminal,
+            Func<CancellationToken, Task<string?>>? pickFolder, Action<LaunchRequest>? openTerminal,
             Func<string, CancellationToken, Task<UsageReport>>? readUsage = null, TimeProvider? clock = null)
         {
             _Store = store;
             _Changed = changed;
             _Quit = quit;
             _PickFolder = pickFolder ?? PickFolderAsync;
-            _OpenTerminal = openTerminal ?? ((id, login, directory) => TerminalLauncher.Open(_Store, id, login, directory));
+            _PickFolderOverride = pickFolder;
+            _OpenTerminal = openTerminal ?? (request => TerminalLauncher.Open(_Store, request));
             _ReadUsage = readUsage ?? ((id, cancellationToken) => new UsageService(_Store).ReadAsync(id, false, cancellationToken));
             _Clock = clock ?? TimeProvider.System;
             _Workspace = store.Preference("workspace") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -92,21 +95,80 @@ namespace Kameo.Desktop
             _ = new AboutWindow().ShowDialog(this);
         }
 
-        /// <summary>Opens a terminal for a harness's selected profile in the saved launch folder.</summary>
+        /// <summary>Opens the launch options for a harness's selected profile, then launches it with the chosen options.</summary>
         /// <param name="harness">The harness whose selected profile is launched.</param>
-        /// <returns>True when the terminal opened; false when a failure was reported in this window.</returns>
-        internal bool LaunchSelected(HarnessKind harness) => RunAction(() => _OpenTerminal(_Store.Selected(harness).Id, false, _Workspace));
+        /// <param name="cancellationToken">Closes the dialog without launching.</param>
+        /// <returns>False when a failure was reported in this window; true when it launched or was canceled.</returns>
+        internal async Task<bool> LaunchSelectedAsync(HarnessKind harness, CancellationToken cancellationToken)
+        {
+            Profile selected;
+            try { selected = _Store.Selected(harness); }
+            catch (Exception error) when (error is InvalidOperationException or Microsoft.Data.Sqlite.SqliteException) { Report(error is InvalidOperationException ? error.Message : "The profile database is busy or unavailable. Try again."); return false; }
+            return await LaunchAsync(selected.Id, cancellationToken) != LaunchResult.Failed;
+        }
 
-        /// <summary>Asks for a folder, then opens a terminal there for a harness's selected profile.</summary>
-        /// <param name="harness">The harness whose selected profile is launched.</param>
-        internal void LaunchSelectedIn(HarnessKind harness) => RunAction(() => { _ = ChooseDirectoryAsync(_Store.Selected(harness).Id, CancellationToken.None); });
+        /// <summary>The launch options dialog while it is open, whether over the manager or on its own from the tray.</summary>
+        internal LaunchOptionsWindow? ActiveLaunchOptions => _LaunchDialog;
 
-        /// <summary>Opens a terminal for a specific profile in the saved launch folder.</summary>
-        /// <returns>True when the terminal opened; false when a failure was reported in this window.</returns>
-        internal bool LaunchProfile(string id) => RunAction(() => _OpenTerminal(id, false, _Workspace));
+        /// <summary>Opens the launch options for a profile, then launches it with the chosen folder and permission level.</summary>
+        /// <param name="id">The profile to launch.</param>
+        /// <param name="cancellationToken">Closes the dialog without launching.</param>
+        /// <returns>False when a failure was reported in this window; true when it launched or was canceled.</returns>
+        internal async Task<bool> LaunchProfileAsync(string id, CancellationToken cancellationToken) => await LaunchAsync(id, cancellationToken) != LaunchResult.Failed;
 
-        /// <summary>Asks for a folder, then opens a terminal there for a specific profile.</summary>
-        internal void LaunchProfileIn(string id) => _ = ChooseDirectoryAsync(id, CancellationToken.None);
+        private async Task<LaunchResult> LaunchAsync(string id, CancellationToken cancellationToken)
+        {
+            Profile profile;
+            string? permission;
+            try
+            {
+                profile = _Store.Get(id);
+                permission = _Store.Preference(LaunchPermissions.PreferenceName(profile.Harness));
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException) { Report("The profile database is busy or unavailable. Try again."); return LaunchResult.Failed; }
+            catch (Exception error) when (error is KeyNotFoundException or ArgumentException) { Report(error.Message); return LaunchResult.Failed; }
+            if (_LaunchDialog != null)
+            {
+                // One launch at a time: bring the open dialog forward instead of stacking another.
+                _LaunchDialog.Activate();
+                return LaunchResult.Canceled;
+            }
+            LaunchOptions? options = await ShowLaunchOptionsAsync(new LaunchOptionsWindow(profile, _Workspace, permission, _PickFolderOverride), cancellationToken);
+            if (options == null) return LaunchResult.Canceled;
+            LaunchPermission level = LaunchPermissions.Find(profile.Harness, options.PermissionId);
+            bool launched = RunAction(() =>
+            {
+                if (!Directory.Exists(options.WorkingDirectory)) throw new DirectoryNotFoundException("The selected launch folder is no longer available.");
+                _OpenTerminal(new LaunchRequest(profile.Id, false, options.WorkingDirectory, level.Arguments));
+                // Remember choices only once the terminal opened.
+                _Store.SetPreference(LaunchPermissions.PreferenceName(profile.Harness), level.Id);
+                if (options.SaveFolder) { _Store.SetPreference("workspace", options.WorkingDirectory); _Workspace = options.WorkingDirectory; Refresh(); }
+            });
+            if (!launched) return LaunchResult.Failed;
+            if (_Status != null)
+            {
+                _Status.Text = "Launched " + profile.Name + (level.Id == LaunchPermissions.DefaultId ? "." : " (" + level.Label + ").");
+                _Status.Foreground = Palette.Accent;
+            }
+            return LaunchResult.Launched;
+        }
+
+        /// <summary>Shows the dialog over the manager when it is visible, or on its own when the manager is hidden in the tray.</summary>
+        private async Task<LaunchOptions?> ShowLaunchOptionsAsync(LaunchOptionsWindow dialog, CancellationToken cancellationToken)
+        {
+            TaskCompletionSource<LaunchOptions?> closed = new TaskCompletionSource<LaunchOptions?>();
+            _LaunchDialog = dialog;
+            dialog.Closed += (_, _) => { _LaunchDialog = null; closed.TrySetResult(dialog.Result); };
+            if (IsVisible) _ = dialog.ShowDialog(this);
+            else
+            {
+                dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                dialog.Show();
+                dialog.Activate();
+            }
+            using (cancellationToken.Register(() => Dispatcher.UIThread.Post(dialog.Close)))
+                return await closed.Task;
+        }
 
         /// <summary>Whether a harness offers Launch lowest usage: Claude Code or Codex with at least two native logins.</summary>
         internal static bool OffersLowestUsage(HarnessKind harness, IEnumerable<Profile> profiles) =>
@@ -117,7 +179,7 @@ namespace Kameo.Desktop
             NativeMenu bar = new NativeMenu();
             bar.Add(NativeMenus.Submenu("File",
                 NativeMenus.Item("Add Profile...", () => _ = EditAsync(null, CancellationToken.None), Avalonia.Input.Key.N),
-                NativeMenus.Item("Choose Launch Directory...", () => _ = ChooseDirectoryAsync(null, CancellationToken.None)),
+                NativeMenus.Item("Choose Launch Directory...", () => _ = ChooseDirectoryAsync(CancellationToken.None)),
                 new NativeMenuItemSeparator(), NativeMenus.Item("Close Window", Close, Avalonia.Input.Key.W)));
             bar.Add(NativeMenus.Edit(this));
             NativeMenu harnesses = new NativeMenu();
@@ -149,12 +211,10 @@ namespace Kameo.Desktop
                 NativeMenu choices = _HarnessMenus[harness];
                 choices.Items.Clear();
                 Profile? active = profiles.FirstOrDefault(profile => profile.Harness == harness && profile.IsActive);
-                NativeMenuItem launch = NativeMenus.Item(active == null ? "No profile selected" : "Launch " + active.Name,
-                    () => _ = LaunchSelected(harness));
+                NativeMenuItem launch = NativeMenus.Item(active == null ? "No profile selected" : "Launch " + active.Name + "...",
+                    () => _ = LaunchSelectedAsync(harness, CancellationToken.None));
                 launch.IsEnabled = active != null;
-                NativeMenuItem launchIn = NativeMenus.Item("Launch in...", () => LaunchSelectedIn(harness));
-                launchIn.IsEnabled = active != null;
-                choices.Add(launch); choices.Add(launchIn); choices.Add(new NativeMenuItemSeparator());
+                choices.Add(launch); choices.Add(new NativeMenuItemSeparator());
                 choices.Add(NativeMenus.Item("Manage profiles...", () => ShowHarness(harness)));
             }
         }
@@ -222,16 +282,16 @@ namespace Kameo.Desktop
                 bool checking = natives.Any(profile => _PendingUsage.ContainsKey(profile.Id));
                 Button usage = Ui.Button("Refresh usage", () => _ = CheckUsageAsync(true, CancellationToken.None));
                 usage.IsEnabled = !checking;
-                ToolTip.SetTip(usage, "Check plan limits now. Results are otherwise reused for 15 minutes. Uses each saved login without changing it.");
+                ToolTip.SetTip(usage, "Check plan limits now. Results are otherwise reused for 15 minutes. Idle Claude Code sign-ins are renewed when they are about to expire.");
                 headingActions.Children.Insert(0, usage);
                 if (OffersLowestUsage(_Harness, all))
                 {
-                    Button lowest = Ui.Button("Launch lowest usage", () => _ = LaunchLowestAsync(_Harness, false, CancellationToken.None));
+                    Button lowest = Ui.Button("Launch lowest usage", () => _ = LaunchLowestAsync(_Harness, CancellationToken.None));
                     UsageReport? least = UsageService.LeastUsed(natives.Where(profile => _Usage.ContainsKey(profile.Id)).Select(profile => _Usage[profile.Id]));
                     Profile? leastProfile = least == null ? null : natives.FirstOrDefault(profile => profile.Id == least.ProfileId);
                     ToolTip.SetTip(lowest, leastProfile == null
-                        ? "Launch the login with the most remaining plan usage in your launch folder."
-                        : "Launch " + leastProfile.Name + " (" + UsageFormat.Percent(least!.PeakPercent) + " used at its tightest limit) in your launch folder.");
+                        ? "Choose launch options for the login with the most remaining plan usage."
+                        : "Choose launch options for " + leastProfile.Name + " (" + UsageFormat.Percent(least!.PeakPercent) + " used at its tightest limit).");
                     headingActions.Children.Insert(1, lowest);
                 }
             }
@@ -289,7 +349,7 @@ namespace Kameo.Desktop
             }
             navigation.Children.Add(new Border { Height = 1, Background = Palette.Border, Margin = new Thickness(0, 12) });
             navigation.Children.Add(Ui.Text("LAUNCH FOLDER", 10, Palette.Muted));
-            Button folder = Ui.Button(Path.GetFileName(_Workspace.TrimEnd(Path.DirectorySeparatorChar)) + "...", () => _ = ChooseDirectoryAsync(null, CancellationToken.None));
+            Button folder = Ui.Button(Path.GetFileName(_Workspace.TrimEnd(Path.DirectorySeparatorChar)) + "...", () => _ = ChooseDirectoryAsync(CancellationToken.None));
             folder.MaxWidth = 146;
             ToolTip.SetTip(folder, _Workspace + "\nChoose a launch folder");
             navigation.Children.Add(folder);
@@ -327,18 +387,16 @@ namespace Kameo.Desktop
                     ? profile.HasNativeCredential ? "Google account saved · isolated login" : "Sign in with a Google account · CLI " + AntigravityCompatibility.SupportedVersion
                     : profile.MuxEndpointsFile.Length > 0 ? "Shared endpoints: " + Path.GetFileName(profile.MuxEndpointsFile)
                     : profile.Kind == CredentialKind.ApiKey ? "API key" : profile.HasNativeCredential ? "Native login saved" : "Sign in or import a login";
-                Button launch = Ui.Button("Launch", () => RunAction(() => _OpenTerminal(profile.Id, false, _Workspace)), true);
-                ToolTip.SetTip(launch, "Open a terminal in " + _Workspace + " with this profile.");
-                Button launchIn = Ui.Button("Launch in...", () => _ = ChooseDirectoryAsync(profile.Id, CancellationToken.None));
-                ToolTip.SetTip(launchIn, "Choose a folder for this launch without changing your saved launch folder.");
+                Button launch = Ui.Button("Launch", () => _ = LaunchProfileAsync(profile.Id, CancellationToken.None), true);
+                ToolTip.SetTip(launch, "Choose a folder and permission level, then open a terminal with this profile.");
                 Button use = Ui.Button(profile.IsActive ? "Selected" : "Use profile", () => RunAction(() => { _Store.Select(profile.Id); Refresh(); _Changed(); }));
                 use.IsEnabled = !profile.IsActive;
                 ToolTip.SetTip(use, "Make this the profile that kameo " + HarnessCatalog.Command(profile.Harness) + " and the tray launch.");
                 WrapPanel primary = new WrapPanel { ItemSpacing = 8, LineSpacing = 8 };
-                primary.Children.Add(launch); primary.Children.Add(launchIn); primary.Children.Add(use);
+                primary.Children.Add(launch); primary.Children.Add(use);
                 if (profile.Kind == CredentialKind.Native && profile.MuxEndpointsFile.Length == 0 && HarnessCatalog.SupportsNativeLogin(profile.Harness))
                 {
-                    primary.Children.Add(Ui.Button(profile.Harness == HarnessKind.Mux ? "Setup" : "Sign in", () => RunAction(() => _OpenTerminal(profile.Id, true, _Workspace))));
+                    primary.Children.Add(Ui.Button(profile.Harness == HarnessKind.Mux ? "Setup" : "Sign in", () => RunAction(() => _OpenTerminal(new LaunchRequest(profile.Id, true, _Workspace)))));
                     primary.Children.Add(ImportButton(profile));
                 }
                 StackPanel manage = Ui.Row(
@@ -509,11 +567,11 @@ namespace Kameo.Desktop
         }
 
         /// <summary>
-        /// Launches a harness's native login with the lowest usage at its tightest limit, checking stale usage first,
-        /// in the saved launch folder or, with <paramref name="chooseFolder"/>, a folder chosen for this launch.
+        /// Opens the launch options for the harness's native login with the lowest usage at its tightest limit, checking
+        /// stale usage first.
         /// </summary>
-        /// <returns>True when a launch started or the folder picker opened; false when a failure was reported in this window.</returns>
-        internal async Task<bool> LaunchLowestAsync(HarnessKind harness, bool chooseFolder, CancellationToken cancellationToken)
+        /// <returns>False when a failure was reported in this window; true when it launched or was canceled.</returns>
+        internal async Task<bool> LaunchLowestAsync(HarnessKind harness, CancellationToken cancellationToken)
         {
             await CheckUsageAsync(harness, false, cancellationToken);
             await Task.WhenAll(_PendingUsage.Values.ToArray());
@@ -527,18 +585,13 @@ namespace Kameo.Desktop
                 Report("No plan usage is available for these " + HarnessCatalog.Name(harness) + " logins yet. Make sure they are signed in, then refresh usage.");
                 return false;
             }
-            if (chooseFolder)
-            {
-                await ChooseDirectoryAsync(target.Id, cancellationToken);
-                return true;
-            }
-            if (!RunAction(() => _OpenTerminal(target.Id, false, _Workspace))) return false;
-            if (_Status != null)
+            LaunchResult result = await LaunchAsync(target.Id, cancellationToken);
+            if (result == LaunchResult.Launched && _Status != null)
             {
                 _Status.Text = "Launched " + target.Name + ": " + UsageFormat.Percent(least.PeakPercent) + " used at its tightest limit.";
                 _Status.Foreground = Palette.Accent;
             }
-            return true;
+            return result != LaunchResult.Failed;
         }
 
         private async Task EditAsync(string? id, CancellationToken cancellationToken)
@@ -588,7 +641,7 @@ namespace Kameo.Desktop
             if (await dialog.ShowDialog<bool>(this)) RunAction(() => { _Store.Delete(profile.Id); Refresh(); _Changed(); });
         }
 
-        private async Task ChooseDirectoryAsync(string? launchProfileId, CancellationToken cancellationToken)
+        private async Task ChooseDirectoryAsync(CancellationToken cancellationToken)
         {
             try
             {
@@ -599,8 +652,7 @@ namespace Kameo.Desktop
                 RunAction(() =>
                 {
                     if (!Directory.Exists(directory)) throw new DirectoryNotFoundException("The selected launch folder is no longer available.");
-                    if (launchProfileId != null) _OpenTerminal(launchProfileId, false, directory);
-                    else { _Store.SetPreference("workspace", directory); _Workspace = directory; Refresh(); }
+                    _Store.SetPreference("workspace", directory); _Workspace = directory; Refresh();
                 });
             }
             catch (OperationCanceledException) { }
