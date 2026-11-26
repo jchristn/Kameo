@@ -100,7 +100,7 @@ namespace Kameo.Core
                 timeout.CancelAfter(TimeSpan.FromSeconds(15));
                 using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Kameo", "0.1.2"));
+                request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Kameo", "0.2.0"));
                 using HttpResponseMessage reply = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
                 response = await ClaudeUsage.ReadBoundedAsync(reply.Content, _MaximumResponseBytes, timeout.Token).ConfigureAwait(false);
                 if (reply.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized)

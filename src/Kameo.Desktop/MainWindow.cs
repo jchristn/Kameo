@@ -360,7 +360,7 @@ namespace Kameo.Desktop
             Grid.SetRow(navigation, 1); panel.Children.Add(navigation);
             StackPanel bottom = Ui.Stack(
                 Ui.Button("Appearance...", ShowAppearance),
-                Ui.Text("v0.1.2 · alpha", 10, Palette.Muted));
+                Ui.Text("v0.2.0 · alpha", 10, Palette.Muted));
             Grid.SetRow(bottom, 2); panel.Children.Add(bottom);
             return new Border { Background = Palette.Sidebar, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 0, 1, 0), Child = panel };
         }

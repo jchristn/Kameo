@@ -132,7 +132,7 @@ namespace Kameo.Core
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", login.AccessToken);
             request.Headers.Add("anthropic-beta", _OAuthBeta);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Kameo", "0.1.2"));
+            request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Kameo", "0.2.0"));
             string message;
             UsageStatus status = UsageStatus.Unavailable;
             try
