@@ -104,7 +104,7 @@ namespace Kameo.Desktop
             Profile selected;
             try { selected = _Store.Selected(harness); }
             catch (Exception error) when (error is InvalidOperationException or Microsoft.Data.Sqlite.SqliteException) { Report(error is InvalidOperationException ? error.Message : "The profile database is busy or unavailable. Try again."); return false; }
-            return await LaunchAsync(selected.Id, cancellationToken) != LaunchResult.Failed;
+            return await LaunchAsync(selected.Id, false, cancellationToken) != LaunchResult.Failed;
         }
 
         /// <summary>The launch options dialog while it is open, whether over the manager or on its own from the tray.</summary>
@@ -112,11 +112,15 @@ namespace Kameo.Desktop
 
         /// <summary>Opens the launch options for a profile, then launches it with the chosen folder and permission level.</summary>
         /// <param name="id">The profile to launch.</param>
+        /// <param name="standalone">
+        /// True to show the dialog on its own, as the tray does, so only the dialog comes forward. Otherwise it is modal over
+        /// the manager when the manager is visible; on macOS an owned window brings its owner to the front with it.
+        /// </param>
         /// <param name="cancellationToken">Closes the dialog without launching.</param>
         /// <returns>False when a failure was reported in this window; true when it launched or was canceled.</returns>
-        internal async Task<bool> LaunchProfileAsync(string id, CancellationToken cancellationToken) => await LaunchAsync(id, cancellationToken) != LaunchResult.Failed;
+        internal async Task<bool> LaunchProfileAsync(string id, bool standalone, CancellationToken cancellationToken) => await LaunchAsync(id, standalone, cancellationToken) != LaunchResult.Failed;
 
-        private async Task<LaunchResult> LaunchAsync(string id, CancellationToken cancellationToken)
+        private async Task<LaunchResult> LaunchAsync(string id, bool standalone, CancellationToken cancellationToken)
         {
             Profile profile;
             string? permission;
@@ -133,7 +137,7 @@ namespace Kameo.Desktop
                 _LaunchDialog.Activate();
                 return LaunchResult.Canceled;
             }
-            LaunchOptions? options = await ShowLaunchOptionsAsync(new LaunchOptionsWindow(profile, _Workspace, permission, _PickFolderOverride), cancellationToken);
+            LaunchOptions? options = await ShowLaunchOptionsAsync(new LaunchOptionsWindow(profile, _Workspace, permission, _PickFolderOverride), standalone, cancellationToken);
             if (options == null) return LaunchResult.Canceled;
             LaunchPermission level = LaunchPermissions.Find(profile.Harness, options.PermissionId);
             bool launched = RunAction(() =>
@@ -153,13 +157,13 @@ namespace Kameo.Desktop
             return LaunchResult.Launched;
         }
 
-        /// <summary>Shows the dialog over the manager when it is visible, or on its own when the manager is hidden in the tray.</summary>
-        private async Task<LaunchOptions?> ShowLaunchOptionsAsync(LaunchOptionsWindow dialog, CancellationToken cancellationToken)
+        /// <summary>Shows the dialog modal over the visible manager, or on its own when requested or when the manager is hidden.</summary>
+        private async Task<LaunchOptions?> ShowLaunchOptionsAsync(LaunchOptionsWindow dialog, bool standalone, CancellationToken cancellationToken)
         {
             TaskCompletionSource<LaunchOptions?> closed = new TaskCompletionSource<LaunchOptions?>();
             _LaunchDialog = dialog;
             dialog.Closed += (_, _) => { _LaunchDialog = null; closed.TrySetResult(dialog.Result); };
-            if (IsVisible) _ = dialog.ShowDialog(this);
+            if (IsVisible && !standalone) _ = dialog.ShowDialog(this);
             else
             {
                 dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -286,7 +290,7 @@ namespace Kameo.Desktop
                 headingActions.Children.Insert(0, usage);
                 if (OffersLowestUsage(_Harness, all))
                 {
-                    Button lowest = Ui.Button("Launch lowest usage", () => _ = LaunchLowestAsync(_Harness, CancellationToken.None));
+                    Button lowest = Ui.Button("Launch lowest usage", () => _ = LaunchLowestAsync(_Harness, false, CancellationToken.None));
                     UsageReport? least = UsageService.LeastUsed(natives.Where(profile => _Usage.ContainsKey(profile.Id)).Select(profile => _Usage[profile.Id]));
                     Profile? leastProfile = least == null ? null : natives.FirstOrDefault(profile => profile.Id == least.ProfileId);
                     ToolTip.SetTip(lowest, leastProfile == null
@@ -387,7 +391,7 @@ namespace Kameo.Desktop
                     ? profile.HasNativeCredential ? "Google account saved · isolated login" : "Sign in with a Google account · CLI " + AntigravityCompatibility.SupportedVersion
                     : profile.MuxEndpointsFile.Length > 0 ? "Shared endpoints: " + Path.GetFileName(profile.MuxEndpointsFile)
                     : profile.Kind == CredentialKind.ApiKey ? "API key" : profile.HasNativeCredential ? "Native login saved" : "Sign in or import a login";
-                Button launch = Ui.Button("Launch", () => _ = LaunchProfileAsync(profile.Id, CancellationToken.None), true);
+                Button launch = Ui.Button("Launch", () => _ = LaunchProfileAsync(profile.Id, false, CancellationToken.None), true);
                 ToolTip.SetTip(launch, "Choose a folder and permission level, then open a terminal with this profile.");
                 Button use = Ui.Button(profile.IsActive ? "Selected" : "Use profile", () => RunAction(() => { _Store.Select(profile.Id); Refresh(); _Changed(); }));
                 use.IsEnabled = !profile.IsActive;
@@ -571,7 +575,10 @@ namespace Kameo.Desktop
         /// stale usage first.
         /// </summary>
         /// <returns>False when a failure was reported in this window; true when it launched or was canceled.</returns>
-        internal async Task<bool> LaunchLowestAsync(HarnessKind harness, CancellationToken cancellationToken)
+        /// <param name="harness">The harness whose native logins are compared.</param>
+        /// <param name="standalone">True to show the dialog on its own without bringing the manager forward, as the tray does.</param>
+        /// <param name="cancellationToken">Cancels the usage check and closes the dialog.</param>
+        internal async Task<bool> LaunchLowestAsync(HarnessKind harness, bool standalone, CancellationToken cancellationToken)
         {
             await CheckUsageAsync(harness, false, cancellationToken);
             await Task.WhenAll(_PendingUsage.Values.ToArray());
@@ -585,7 +592,7 @@ namespace Kameo.Desktop
                 Report("No plan usage is available for these " + HarnessCatalog.Name(harness) + " logins yet. Make sure they are signed in, then refresh usage.");
                 return false;
             }
-            LaunchResult result = await LaunchAsync(target.Id, cancellationToken);
+            LaunchResult result = await LaunchAsync(target.Id, standalone, cancellationToken);
             if (result == LaunchResult.Launched && _Status != null)
             {
                 _Status.Text = "Launched " + target.Name + ": " + UsageFormat.Percent(least.PeakPercent) + " used at its tightest limit.";

@@ -70,6 +70,7 @@ namespace Test.Desktop
                     Button[] LaunchButtons() => window.GetVisualDescendants().OfType<Button>().Where(button => button.Content as string == "Launch").ToArray();
                     Check(LaunchButtons().Length == 2 && !window.GetVisualDescendants().OfType<Button>().Any(button => button.Content as string == "Launch in..."), "Each profile card needs one Launch button, which replaces Launch in....");
                     Click(LaunchButtons()[0]); Check(Dialog(window).Title == "Launch Personal" && Field(Dialog(window), "LaunchFolder").Text == store.Root, "The dialog should name the profile and propose the saved folder.");
+                    Check(ReferenceEquals(Dialog(window).Owner, window), "A launch from the manager should be modal over it.");
                     Confirm(window);
                     Click(LaunchButtons()[1]); Confirm(window);
                     Click(LaunchButtons()[0]); Field(Dialog(window), "LaunchFolder").Text = chosen; Confirm(window);
@@ -156,7 +157,7 @@ namespace Test.Desktop
             Add("OneLaunchDialogAtATime", (_, store) => WithLaunchWindow(store, _ => Task.FromResult<string?>(null), (window, launches) =>
             {
                 Click(Button(window, "Launch")); LaunchOptionsWindow first = Dialog(window);
-                Check(window.LaunchProfileAsync(store.Selected(HarnessKind.Claude).Id, CancellationToken.None).IsCompletedSuccessfully, "A second launch should return at once.");
+                Check(window.LaunchProfileAsync(store.Selected(HarnessKind.Claude).Id, true, CancellationToken.None).IsCompletedSuccessfully, "A second launch should return at once.");
                 Check(window.OwnedWindows.OfType<LaunchOptionsWindow>().Count() == 1 && ReferenceEquals(window.ActiveLaunchOptions, first), "A second launch opened another dialog.");
                 Confirm(window);
                 Check(launches.Count == 1, "The open dialog did not launch exactly once.");
@@ -248,7 +249,9 @@ namespace Test.Desktop
                         Check(firstItem.Menu!.Items.OfType<NativeMenuItem>().Where(item => item is not NativeMenuItemSeparator).Select(item => item.Header).SequenceEqual(new[] { "Launch...", "Use as default" }), "A profile submenu should offer Launch... and Use as default.");
                         Check(!Child(firstItem.Menu!, "Use as default").IsEnabled && Child(firstItem.Menu!, "Use as default").IsChecked, "The default profile's Use as default should be ticked and disabled.");
                         int shownBefore = shown;
-                        Click(Child(firstItem.Menu!, "Launch...")); Confirm(window);
+                        Click(Child(firstItem.Menu!, "Launch..."));
+                        Check(Dialog(window).Owner == null && window.OwnedWindows.Count == 0, "A tray launch should open the dialog on its own so the open manager is not brought forward.");
+                        Confirm(window);
                         Check(launches.Last() == first.Id && folders.Last() == store.Root && shown == shownBefore, "Tray launch used the wrong profile or folder, or opened the manager.");
                         NativeMenu secondMenu = Child(choices, "Second").Menu!;
                         Click(Child(secondMenu, "Launch...")); Confirm(window); Check(launches.Last() == second.Id && store.Selected(harness).Id == first.Id, "Launching a profile should not change the default.");

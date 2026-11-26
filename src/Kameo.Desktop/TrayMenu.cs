@@ -87,13 +87,14 @@ namespace Kameo.Desktop
 
         private async Task LaunchAsync(string id)
         {
-            // Only the options dialog appears; the manager is shown only so a failure message is visible.
-            if (!await _Window.LaunchProfileAsync(id, CancellationToken.None)) _Show();
+            // Only the options dialog comes forward, even when the manager is open behind other apps. The manager is
+            // shown only so a failure message is visible.
+            if (!await _Window.LaunchProfileAsync(id, true, CancellationToken.None)) _Show();
         }
 
         private async Task LaunchLowestAsync(HarnessKind harness)
         {
-            if (!await _Window.LaunchLowestAsync(harness, CancellationToken.None)) _Show();
+            if (!await _Window.LaunchLowestAsync(harness, true, CancellationToken.None)) _Show();
         }
 
         private void Select(Profile profile)
