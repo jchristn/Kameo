@@ -4,6 +4,8 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 ## [Unreleased]
 
+- Tests: the desktop test runner exits after its suite finishes. It disposed the headless Avalonia session on that session's own dispatcher thread and waited on itself.
+
 ## [0.2.2] - 2026-11-27
 
 Alpha. Antigravity version support.
