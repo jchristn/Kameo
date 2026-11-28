@@ -6,8 +6,8 @@
   <key>CFBundleIdentifier</key><string>com.kameo.desktop</string>
   <key>CFBundleExecutable</key><string>Kameo.Desktop</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.2.3</string>
-  <key>CFBundleVersion</key><string>0.2.3</string>
+  <key>CFBundleShortVersionString</key><string>0.2.4</string>
+  <key>CFBundleVersion</key><string>0.2.4</string>
   <key>CFBundleIconFile</key><string>Kameo.icns</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>

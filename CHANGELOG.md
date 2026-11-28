@@ -4,6 +4,10 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-28
+
+Alpha. A fresh Claude sign-in is no longer hidden by a stale Keychain item.
+
 - macOS: Kameo reads a profile's Keychain login stored under your user name first, as Claude Code does. A stale item Claude had saved under another name (such as `unknown`) with the same service could hide a fresh sign-in, so usage kept saying the saved login had no access token. Deleting a profile removes every item with its service.
 
 ## [0.2.3] - 2026-11-28
