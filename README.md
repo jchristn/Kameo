@@ -165,7 +165,7 @@ dotnet tool install --global Kameo.Cli --version 0.2.4 --source ./artifacts/pack
 kameo --version
 ```
 
-`dotnet pack` builds the CLI and creates `artifacts/packages/Kameo.Cli.0.1.0.nupkg`. The install command uses that local package; no NuGet publication is needed. The package name is **Kameo.Cli**, and the installed command is **kameo**. Global means available to your current user from any directory. It installs the CLI only; build and start the desktop with the platform scripts above. Keep the .NET 10 runtime installed.
+`dotnet pack` builds the CLI and creates `artifacts/packages/Kameo.Cli.<version>.nupkg` (for example `Kameo.Cli.0.2.4.nupkg`). The install command uses that local package; no NuGet publication is needed. The package name is **Kameo.Cli**, and the installed command is **kameo**. Global means available to your current user from any directory. It installs the CLI only; build and start the desktop with the platform scripts above. Keep the .NET 10 runtime installed.
 
 The .NET SDK normally adds its global-tools directory to `PATH`. If `kameo` is not found, reopen your terminal or add it for the current session:
 
