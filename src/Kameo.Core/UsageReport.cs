@@ -22,6 +22,13 @@ namespace Kameo.Core
         public string Plan { get; init; } = "";
         /// <summary>Additional plan state, such as a credit balance. May be empty.</summary>
         public string Detail { get; init; } = "";
+        /// <summary>The email address of the account the login belongs to, when known. May be empty.</summary>
+        public string Account { get; init; } = "";
+        /// <summary>
+        /// When the saved sign-in stops renewing and the user must sign in again, in UTC, when the login records it.
+        /// Null when unknown or when the profile is signed out.
+        /// </summary>
+        public DateTimeOffset? SignInEndsUtc { get; init; }
         /// <summary>When the figures were observed, in UTC.</summary>
         public DateTimeOffset? ObservedUtc { get; init; }
         /// <summary>Limit windows in display order. Empty unless <see cref="Status"/> is <see cref="UsageStatus.Available"/>.</summary>
@@ -36,6 +43,12 @@ namespace Kameo.Core
                 return peak;
             }
         }
+
+        internal UsageReport WithAccount(string account, DateTimeOffset? signInEnds) => new UsageReport
+        {
+            ProfileId = ProfileId, ProfileName = ProfileName, Harness = Harness, Status = Status, Source = Source, Message = Message, Plan = Plan,
+            Detail = Detail, ObservedUtc = ObservedUtc, Windows = Windows, Account = account, SignInEndsUtc = signInEnds
+        };
 
         internal static UsageReport For(Profile profile, UsageStatus status, string message) => new UsageReport
         {

@@ -1,7 +1,9 @@
 namespace Kameo.Core
 {
     using System;
+    using System.Collections.Generic;
     using System.Diagnostics;
+    using System.Globalization;
     using System.IO;
     using System.Security.Cryptography;
     using System.Text;
@@ -17,6 +19,8 @@ namespace Kameo.Core
     public static class MacCredentialBridge
     {
         private const int _ItemNotFound = 44;
+        // Saved login versions this process has already written back to the Keychain, as "service:expiresAt".
+        private static readonly HashSet<string> _Restored = new HashSet<string>(StringComparer.Ordinal);
 
         /// <summary>Returns Claude's keychain service for an explicit config directory, or its default service.</summary>
         public static string ServiceName(string? directory) => "Claude Code-credentials" + (directory == null ? "" : "-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(directory.Normalize(NormalizationForm.FormC))))[..8]);
@@ -49,6 +53,48 @@ namespace Kameo.Core
                 return;
             }
             if (restore && fileFreshness != null) await keychain.WriteAsync(service, file!, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Keeps a profile's saved login current while sessions may be running, as part of a usage check. Saves the
+        /// Keychain login to the file when it is at least as fresh. When the Keychain item is cleared or older,
+        /// writes the file back once per saved version, so a login Anthropic rejected is not restored repeatedly.
+        /// Waits for a launch that is preparing and skips the profile while a sign-in is running. Failures change nothing.
+        /// </summary>
+        internal static async Task MaintainAsync(ProfileStore store, string id, IClaudeKeychain keychain, CancellationToken cancellationToken)
+        {
+            FileStream preparation;
+            try { preparation = await store.AcquirePreparationLeaseAsync(id, cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return; }
+            using (preparation)
+            {
+                if (store.SignInRunning(id)) return;
+                string directory = store.ProfileDirectory(id);
+                string service = ServiceName(directory);
+                string path = Path.Combine(directory, HarnessCatalog.CredentialFile(HarnessKind.Claude));
+                string? file;
+                string? live;
+                try
+                {
+                    file = File.Exists(path) ? PrivateFiles.Read(path).Trim() : null;
+                    live = (await keychain.ReadAsync(service, cancellationToken).ConfigureAwait(false))?.Trim();
+                }
+                catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException) { return; }
+                long? liveFreshness = Freshness(live);
+                long? fileFreshness = Freshness(file);
+                if (liveFreshness != null && (fileFreshness == null || liveFreshness.Value >= fileFreshness.Value))
+                {
+                    try { if (!string.Equals(live, file, StringComparison.Ordinal)) PrivateFiles.Write(path, live!); }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+                    return;
+                }
+                // A missing item is left for the next launch, which restores it before Claude starts.
+                if (fileFreshness == null || string.IsNullOrWhiteSpace(live)) return;
+                string version = service + ":" + fileFreshness.Value.ToString(CultureInfo.InvariantCulture);
+                lock (_Restored) { if (!_Restored.Add(version)) return; }
+                try { await keychain.WriteAsync(service, file!, cancellationToken).ConfigureAwait(false); }
+                catch (Exception error) when (error is InvalidOperationException or IOException) { }
+            }
         }
 
         /// <summary>Returns a usable Claude login's access-token expiry in Unix milliseconds, or null when it cannot sign in.</summary>

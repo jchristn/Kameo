@@ -107,13 +107,19 @@ namespace Kameo.Core
         {
             cancellationToken.ThrowIfCancellationRequested();
             using FileStream preparation = await _Store.AcquirePreparationLeaseAsync(id, cancellationToken).ConfigureAwait(false);
-            using FileStream lease = login ? _Store.AcquireLease(id) : _Store.AcquireSessionLease(id);
             Profile profile = _Store.Get(id);
+            bool claudeNative = profile.Harness == HarnessKind.Claude && profile.Kind == CredentialKind.Native;
+            // A Claude Code sign-in only replaces the profile's saved login, which running sessions read again when theirs
+            // stops working, so it joins open sessions. Kameo's own renewal and edits still need every session to exit.
+            using FileStream lease = login && !claudeNative ? _Store.AcquireLease(id) : _Store.AcquireSessionLease(id);
+            using FileStream? signIn = login && claudeNative ? _Store.AcquireSignInLease(id) : null;
+            if (!login && claudeNative && _Store.SignInRunning(id))
+                throw new InvalidOperationException("A sign-in is running for this profile. Finish it in its terminal, then launch again.");
             LaunchPlan plan = Prepare(profile, arguments, login);
             ProcessStartInfo resolved = ExecutableResolver.Resolve(plan.StartInfo);
             if (profile.Harness == HarnessKind.Antigravity && profile.Kind == CredentialKind.Native)
                 await AntigravityCompatibility.VerifyAsync(resolved, _Store.ProfileDirectory(id), cancellationToken).ConfigureAwait(false);
-            bool bridge = profile.Harness == HarnessKind.Claude && profile.Kind == CredentialKind.Native && OperatingSystem.IsMacOS();
+            bool bridge = claudeNative && OperatingSystem.IsMacOS();
             // The preparation lease serializes this with other sessions. The Keychain login wins unless it is missing,
             // cleared or older, so a refreshed login survives a session that ended without saving it.
             if (bridge) await MacCredentialBridge.SynchronizeAsync(_Store.ProfileDirectory(id), true, cancellationToken).ConfigureAwait(false);

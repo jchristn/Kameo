@@ -4,6 +4,9 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 ## [Unreleased]
 
+- Claude Code sign-in works while sessions for that profile are open. When Claude clears a profile's login after a rejected renewal, **Sign in** no longer says the profile is in use; launches of that profile wait until the sign-in finishes, and sessions for other profiles are unaffected. Codex, Antigravity and Mux sign-in still need the profile's sessions closed.
+- On macOS, every Claude usage check, including the desktop's 15-minute background check, saves the Keychain login to the profile file while sessions run, and puts back a login Claude cleared (once per saved version), instead of only at launch and exit.
+- Claude profile cards and `kameo usage` show the signed-in account, flag a profile named with an email address that is signed in to a different account, and warn five days before a saved sign-in can no longer be renewed. `kameo login` prints the signed-in account and warns when it changed. `UsageReport` gains `Account` and `SignInEndsUtc`, also in `kameo usage --json`.
 - Tests: the desktop test runner exits after its suite finishes. It disposed the headless Avalonia session on that session's own dispatcher thread and waited on itself.
 
 ## [0.2.2] - 2026-11-27

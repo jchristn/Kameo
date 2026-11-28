@@ -46,6 +46,27 @@ namespace Test.Shared
                 Fixture.Check(report.Windows[2].ResetsAt == null && report.Windows[3].WindowMinutes == 10080, "Null resets or model windows parsed incorrectly.");
                 Fixture.Check(report.Plan == "Max 20x" && report.Detail == "Extra usage enabled", "Plan or detail missing: " + report.Plan + " / " + report.Detail);
             });
+            Add("ClaudeReportsAccountAndSignInEnd", async (fixture, cancellationToken) =>
+            {
+                Profile profile = fixture.Add(HarnessKind.Claude, "expected@example.test", CredentialKind.Native);
+                string directory = fixture.Store.ProfileDirectory(profile.Id);
+                DateTimeOffset ends = DateTimeOffset.UtcNow.AddDays(2);
+                PrivateFiles.Write(Path.Combine(directory, ".credentials.json"), "{\"claudeAiOauth\":{\"accessToken\":\"synthetic-access\",\"refreshToken\":\"synthetic-refresh\",\"expiresAt\":"
+                    + DateTimeOffset.UtcNow.AddHours(4).ToUnixTimeMilliseconds() + ",\"refreshTokenExpiresAt\":" + ends.ToUnixTimeMilliseconds() + "}}");
+                PrivateFiles.Write(Path.Combine(directory, ".claude.json"), "{\"oauthAccount\":{\"emailAddress\":\"other@example.test\"}}");
+                FakeHttpHandler handler = new FakeHttpHandler(_ => Json(HttpStatusCode.OK, "{\"five_hour\":{\"utilization\":1,\"resets_at\":null}}"));
+                UsageReport report = await ReadAsync(Service(fixture, handler), profile.Id, false, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(report.Status == UsageStatus.Available && report.Account == "other@example.test", "The signed-in account was not reported: " + report.Account);
+                Fixture.Check(report.SignInEndsUtc != null && Math.Abs((report.SignInEndsUtc.Value - ends).TotalSeconds) < 1, "The sign-in end was not reported.");
+                DateTimeOffset now = DateTimeOffset.UtcNow;
+                Fixture.Check(UsageFormat.WrongAccount(report) && UsageFormat.Account(report).Contains("not expected@example.test", StringComparison.Ordinal), "A wrong account was not flagged: " + UsageFormat.Account(report));
+                Fixture.Check(UsageFormat.SignInEnds(report, now).StartsWith("Sign-in ends ", StringComparison.Ordinal), "A sign-in ending soon was not flagged.");
+                Fixture.Check(UsageFormat.SignInEnds(report, ends.AddDays(-6)).Length == 0 && UsageFormat.SignInEnds(report, ends.AddMinutes(1)).Contains("no longer", StringComparison.Ordinal), "The sign-in warning window is wrong.");
+                UsageReport matching = new UsageReport { ProfileName = "Other@Example.test", Account = "other@example.test" };
+                UsageReport unnamed = new UsageReport { ProfileName = "Work", Account = "other@example.test" };
+                Fixture.Check(!UsageFormat.WrongAccount(matching) && !UsageFormat.WrongAccount(unnamed) && UsageFormat.Account(unnamed) == "Signed in as other@example.test"
+                    && UsageFormat.Account(new UsageReport()).Length == 0, "Account text is wrong for matching or non-email names.");
+            });
             Add("ClaudeExpiredLoginRenewalFailureSkipsUsage", async (fixture, cancellationToken) =>
             {
                 Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddMinutes(-5));

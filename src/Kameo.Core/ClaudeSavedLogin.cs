@@ -11,6 +11,8 @@ namespace Kameo.Core
         internal string Plan { get; init; } = "";
         /// <summary>When the access token expires, when recorded.</summary>
         internal DateTimeOffset? Expires { get; init; }
+        /// <summary>When the refresh token expires and the user must sign in again, when recorded.</summary>
+        internal DateTimeOffset? RefreshExpires { get; init; }
         /// <summary>A report explaining why the login cannot be used, or null when it can.</summary>
         internal UsageReport? Problem { get; init; }
     }

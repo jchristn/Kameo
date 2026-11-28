@@ -455,6 +455,10 @@ namespace Kameo.Desktop
             }
             string summary = string.Join(" · ", new[] { report.Plan, report.Detail, UsageFormat.Observed(report, now) }.Where(part => part.Length > 0));
             if (summary.Length > 0) panel.Children.Add(Ui.Text(summary, 12, Palette.Muted));
+            string account = UsageFormat.Account(report);
+            if (account.Length > 0) panel.Children.Add(Ui.Text(account, 12, UsageFormat.WrongAccount(report) ? Palette.Danger : Palette.Muted));
+            string ends = UsageFormat.SignInEnds(report, now);
+            if (ends.Length > 0) panel.Children.Add(Ui.Text(ends, 12, Palette.Danger));
             if (report.Message.Length > 0)
                 panel.Children.Add(Ui.Text(report.Message, 12, report.Status is UsageStatus.Unavailable or UsageStatus.Expired ? Palette.Danger : Palette.Muted));
             return new Border

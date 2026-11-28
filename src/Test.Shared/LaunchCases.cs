@@ -248,6 +248,34 @@ namespace Test.Shared
             return new TestSuiteDescriptor("Launch", "Harness isolation and real child processes", cases);
         }
 
+        // A Claude Code sign-in joins open sessions. While it runs, launches and a second sign-in wait for it, and edits stay blocked.
+        private static async Task SignInAlongsideSessionsAsync(Fixture fixture, Profile profile, CancellationToken cancellationToken)
+        {
+            string capture = Path.Combine(fixture.Root, "signin.json");
+            string stop = Path.Combine(fixture.Root, "signin.stop");
+            Task<CliResult> login = CliCases.RunAsync(fixture, new[] { "login", profile.Id, "--", "--capture", capture, "--wait-for-file", stop }, null, cancellationToken);
+            try
+            {
+                while (!File.Exists(capture))
+                {
+                    Fixture.Check(!login.IsCompleted, "A Claude sign-in was refused while sessions were open: " + (login.IsCompleted ? login.Result.Error : ""));
+                    await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+                }
+                JsonNode data = JsonNode.Parse(File.ReadAllText(capture))!;
+                Fixture.Check(data["arguments"]!.AsArray().Take(2).Select(value => value?.GetValue<string>()).SequenceEqual(new[] { "auth", "login" }), "The sign-in did not run claude auth login.");
+                CliResult launch = await CliCases.RunAsync(fixture, new[] { "run-profile", profile.Id, "--", "--capture", Path.Combine(fixture.Root, "during.json") }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(launch.ExitCode == 1 && launch.Error.Contains("sign-in is running", StringComparison.Ordinal), "A launch started during a sign-in.");
+                CliResult second = await CliCases.RunAsync(fixture, new[] { "login", profile.Id, "--", "--capture", Path.Combine(fixture.Root, "second-signin.json") }, null, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(second.ExitCode == 1 && second.Error.Contains("already running", StringComparison.Ordinal), "Two sign-ins ran for one profile.");
+                Fixture.Throws<InvalidOperationException>(() => fixture.Store.Update(profile));
+            }
+            finally { File.WriteAllText(stop, "stop"); }
+            Fixture.Check((await login.ConfigureAwait(false)).ExitCode == 0, "The sign-in did not finish.");
+            Fixture.Check(!fixture.Store.SignInRunning(profile.Id), "The sign-in lock outlived its sign-in.");
+            CliResult after = await CliCases.RunAsync(fixture, new[] { "run-profile", profile.Id, "--", "--capture", Path.Combine(fixture.Root, "after-signin.json") }, null, cancellationToken).ConfigureAwait(false);
+            Fixture.Check(after.ExitCode == 0, "A launch failed after the sign-in finished.");
+        }
+
         private static async Task ConcurrentSessionsAsync(Fixture fixture, HarnessKind harness, CredentialKind kind, CancellationToken cancellationToken)
         {
             Profile profile = fixture.Add(harness, kind: kind);
@@ -288,8 +316,12 @@ namespace Test.Shared
                 if (kind == CredentialKind.Native)
                 {
                     Fixture.Throws<InvalidOperationException>(() => new CredentialFiles(fixture.Store).ImportText(profile.Id, CredentialCases.Document(harness)));
-                    CliResult login = await CliCases.RunAsync(fixture, new[] { "login", profile.Id }, null, timeout.Token).ConfigureAwait(false);
-                    Fixture.Check(login.ExitCode == 1 && login.Error.Contains("in use", StringComparison.Ordinal), "Login must remain exclusive while sessions run.");
+                    if (harness == HarnessKind.Claude) await SignInAlongsideSessionsAsync(fixture, profile, timeout.Token).ConfigureAwait(false);
+                    else
+                    {
+                        CliResult login = await CliCases.RunAsync(fixture, new[] { "login", profile.Id }, null, timeout.Token).ConfigureAwait(false);
+                        Fixture.Check(login.ExitCode == 1 && login.Error.Contains("in use", StringComparison.Ordinal), "Login must remain exclusive while sessions run.");
+                    }
                 }
                 File.WriteAllText(firstStop, "stop");
                 Fixture.Check((await first.ConfigureAwait(false)).ExitCode == 17, "First session lost its exit code.");

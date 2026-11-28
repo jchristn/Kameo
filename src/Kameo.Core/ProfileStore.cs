@@ -201,6 +201,36 @@ namespace Kameo.Core
         /// <exception cref="InvalidOperationException">An exclusive operation is using this profile.</exception>
         public FileStream AcquireSessionLease(string id) => AcquireProfileLease(id, FileShare.ReadWrite);
 
+        /// <summary>
+        /// Marks a Claude Code sign-in as running for its whole duration. Launches check it under the preparation lease, so
+        /// none can restore an older saved login over the one being written.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Another sign-in is running for this profile.</exception>
+        internal FileStream AcquireSignInLease(string id)
+        {
+            try { return OpenLease(SignInLeasePath(id), FileShare.None); }
+            catch (IOException) { throw new InvalidOperationException("A sign-in is already running for this profile. Finish it in its terminal first."); }
+        }
+
+        /// <summary>Whether a Claude Code sign-in is running for a profile.</summary>
+        internal bool SignInRunning(string id)
+        {
+            try
+            {
+                using FileStream probe = OpenLease(SignInLeasePath(id), FileShare.ReadWrite);
+                return false;
+            }
+            catch (IOException) { return true; }
+        }
+
+        private string SignInLeasePath(string id)
+        {
+            ValidateId(id);
+            string path = Path.Combine(Root, "locks", id + ".signin.lock");
+            PrivateFiles.CheckPath(path);
+            return path;
+        }
+
         internal async Task<FileStream> AcquirePreparationLeaseAsync(string id, CancellationToken cancellationToken)
         {
             ValidateId(id);

@@ -29,9 +29,25 @@ namespace Kameo.Core
         internal static async Task<UsageReport> ReadAsync(ProfileStore store, Profile profile, HttpClient client, Uri endpoint, Uri tokenEndpoint,
             IClaudeKeychain? keychain, TimeProvider clock, bool offline, CancellationToken cancellationToken)
         {
-            string directory = store.ProfileDirectory(profile.Id);
             // Offline checks never read the saved login or the Keychain.
             if (offline) return UsageReport.For(profile, UsageStatus.NotChecked, "Claude Code usage requires a live check.");
+            string directory = store.ProfileDirectory(profile.Id);
+            // Back up the Keychain login while sessions run, and put back a login Claude cleared.
+            if (keychain != null) await MacCredentialBridge.MaintainAsync(store, profile.Id, keychain, cancellationToken).ConfigureAwait(false);
+            UsageReport report = await ReadLoginAsync(store, profile, directory, client, endpoint, tokenEndpoint, keychain, clock, cancellationToken).ConfigureAwait(false);
+            ClaudeAccount account = await ClaudeAccount.ReadAsync(directory, keychain, cancellationToken).ConfigureAwait(false);
+            DateTimeOffset? ends = null;
+            if (report.Status != UsageStatus.SignedOut)
+            {
+                ClaudeSavedLogin? login = await LoadAsync(profile, directory, keychain, cancellationToken).ConfigureAwait(false);
+                if (login != null && login.Problem == null) ends = login.RefreshExpires;
+            }
+            return report.WithAccount(account.Email, ends);
+        }
+
+        private static async Task<UsageReport> ReadLoginAsync(ProfileStore store, Profile profile, string directory, HttpClient client, Uri endpoint, Uri tokenEndpoint,
+            IClaudeKeychain? keychain, TimeProvider clock, CancellationToken cancellationToken)
+        {
             UsageReport? problem;
             ClaudeSavedLogin? login = await LoadAsync(profile, directory, keychain, cancellationToken).ConfigureAwait(false);
             if (login == null) return UsageReport.For(profile, UsageStatus.SignedOut, "Sign in to see plan usage.");
@@ -119,12 +135,16 @@ namespace Kameo.Core
                 return new ClaudeSavedLogin
                 {
                     AccessToken = access.GetString()!, Plan = Plan(oauth),
-                    Expires = oauth.TryGetProperty("expiresAt", out JsonElement expiry) && expiry.ValueKind == JsonValueKind.Number && expiry.TryGetInt64(out long milliseconds)
-                        ? DateTimeOffset.FromUnixTimeMilliseconds(milliseconds) : null
+                    Expires = Milliseconds(oauth, "expiresAt", true), RefreshExpires = Milliseconds(oauth, "refreshTokenExpiresAt", false)
                 };
             }
             catch (JsonException) { return new ClaudeSavedLogin { Problem = UsageReport.For(profile, UsageStatus.Unavailable, "The saved login is not valid JSON. Sign in again or re-import it.") }; }
         }
+
+        // A recorded zero access-token expiry means already expired; a zero refresh expiry means unknown.
+        private static DateTimeOffset? Milliseconds(JsonElement oauth, string name, bool allowZero)
+            => oauth.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long milliseconds) && (allowZero || milliseconds > 0)
+                ? DateTimeOffset.FromUnixTimeMilliseconds(milliseconds) : null;
 
         // Returns the usage response body, or null after passing a display-safe report to fail.
         private static async Task<string?> QueryAsync(Profile profile, HttpClient client, Uri endpoint, ClaudeSavedLogin login, CancellationToken cancellationToken, Action<UsageReport> fail)

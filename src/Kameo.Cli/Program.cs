@@ -86,10 +86,10 @@ namespace Kameo.Cli
                 case "import-current": Require(args, 2); await new CurrentLoginImporter(store).ImportAsync(args[1], cancellationToken).ConfigureAwait(false); return 0;
                 case "usage": return await UsageAsync(store, args, cancellationToken).ConfigureAwait(false);
                 case "mux-config": Require(args, 5); new CredentialFiles(store).ConfigureMux(args[1], args[2], args[3], args[4]); return 0;
-                case "login":
+                case "login": Require(args, 2); return await LoginAsync(store, args[1], Tail(args, 2), cancellationToken).ConfigureAwait(false);
                 case "run-profile":
                     Require(args, 2);
-                    return await new LaunchService(store).RunAsync(args[1], Tail(args, 2), args[0] == "login", cancellationToken).ConfigureAwait(false);
+                    return await new LaunchService(store).RunAsync(args[1], Tail(args, 2), false, cancellationToken).ConfigureAwait(false);
                 case "run":
                     Require(args, 2);
                     return await new LaunchService(store).RunAsync(store.Selected(HarnessCatalog.Parse(args[1])).Id, Tail(args, 2), false, cancellationToken).ConfigureAwait(false);
@@ -97,6 +97,24 @@ namespace Kameo.Cli
                     return await new LaunchService(store).RunAsync(store.Selected(HarnessCatalog.Parse(args[0])).Id, Tail(args, 1), false, cancellationToken).ConfigureAwait(false);
                 default: throw new ArgumentException("Unknown command. Run kameo --help for usage.");
             }
+        }
+
+        private static async Task<int> LoginAsync(ProfileStore store, string id, string[] arguments, CancellationToken cancellationToken)
+        {
+            Profile profile = store.Get(id);
+            bool claude = profile.Harness == HarnessKind.Claude && profile.Kind == CredentialKind.Native;
+            ClaudeAccount? before = claude ? await ClaudeAccount.ReadAsync(store.ProfileDirectory(id), cancellationToken).ConfigureAwait(false) : null;
+            int exitCode = await new LaunchService(store).RunAsync(id, arguments, true, cancellationToken).ConfigureAwait(false);
+            if (before == null) return exitCode;
+            ClaudeAccount after = await ClaudeAccount.ReadAsync(store.ProfileDirectory(id), cancellationToken).ConfigureAwait(false);
+            if (ClaudeAccount.AreDifferent(before, after))
+            {
+                string was = before.Email.Length > 0 ? " (was " + before.Email + ")" : "";
+                string now = after.Email.Length > 0 ? after.Email : "a different account";
+                Console.Error.WriteLine("Kameo: Warning: this profile is now signed in to " + now + was + ". If that was not intended, sign in again and choose the right account in the browser.");
+            }
+            else if (after.Email.Length > 0) Console.Error.WriteLine("Kameo: Signed in as " + after.Email + ".");
+            return exitCode;
         }
 
         private static async Task<int> UsageAsync(ProfileStore store, string[] args, CancellationToken cancellationToken)
@@ -131,6 +149,10 @@ namespace Kameo.Cli
                     string reset = UsageFormat.Reset(window.ResetsAt, now);
                     Console.WriteLine("  " + window.Label.PadRight(16) + UsageFormat.Percent(window.UsedPercent).PadLeft(5) + "  [" + new string('#', filled) + new string('-', 20 - filled) + "]" + (reset.Length > 0 ? "  " + reset : ""));
                 }
+                string account = UsageFormat.Account(report);
+                if (account.Length > 0) Console.WriteLine("  " + account);
+                string ends = UsageFormat.SignInEnds(report, now);
+                if (ends.Length > 0) Console.WriteLine("  " + ends);
                 if (report.Detail.Length > 0) Console.WriteLine("  " + report.Detail);
                 if (report.Message.Length > 0) Console.WriteLine("  " + report.Message);
             }
@@ -154,6 +176,8 @@ namespace Kameo.Cli
                     writer.WriteString("plan", report.Plan);
                     writer.WriteString("detail", report.Detail);
                     writer.WriteString("message", report.Message);
+                    writer.WriteString("account", report.Account);
+                    if (report.SignInEndsUtc == null) writer.WriteNull("signInEndsUtc"); else writer.WriteString("signInEndsUtc", report.SignInEndsUtc.Value);
                     if (report.ObservedUtc == null) writer.WriteNull("observedUtc"); else writer.WriteString("observedUtc", report.ObservedUtc.Value);
                     writer.WriteStartArray("windows");
                     foreach (UsageWindow window in report.Windows)

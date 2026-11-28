@@ -107,6 +107,87 @@ namespace Test.Shared
                     && MacCredentialBridge.Freshness("not json") == null && MacCredentialBridge.Freshness(null) == null, "Unusable logins were treated as usable.");
             });
 
+            Add("ClaudeMaintenanceBacksUpRunningSessionLogin", async (fixture, cancellationToken) =>
+            {
+                // A session refreshed its login days after launch. A usage check saves it without waiting for the session to end.
+                Profile profile = fixture.Add(HarnessKind.Claude, "backup@example.test", CredentialKind.Native);
+                string directory = fixture.Store.ProfileDirectory(profile.Id);
+                FakeKeychain keychain = new FakeKeychain();
+                WriteFile(directory, Claude("launched", 1000));
+                keychain.Items[MacCredentialBridge.ServiceName(directory)] = Claude("rotated", 2000);
+                using (FileStream session = fixture.Store.AcquireSessionLease(profile.Id))
+                    await MacCredentialBridge.MaintainAsync(fixture.Store, profile.Id, keychain, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(ReadFile(directory) == Claude("rotated", 2000) && keychain.Writes == 0, "A running session's refreshed login was not backed up.");
+            });
+            Add("ClaudeMaintenanceRestoresClearedLoginOnce", async (fixture, cancellationToken) =>
+            {
+                Profile profile = fixture.Add(HarnessKind.Claude, "restore@example.test", CredentialKind.Native);
+                string directory = fixture.Store.ProfileDirectory(profile.Id);
+                string service = MacCredentialBridge.ServiceName(directory);
+                FakeKeychain keychain = new FakeKeychain();
+                string cleared = "{\"claudeAiOauth\":{\"accessToken\":\"\",\"refreshToken\":\"\",\"expiresAt\":0}}";
+                WriteFile(directory, Claude("saved", 1000));
+                keychain.Items[service] = cleared;
+                using (FileStream session = fixture.Store.AcquireSessionLease(profile.Id))
+                {
+                    await MacCredentialBridge.MaintainAsync(fixture.Store, profile.Id, keychain, cancellationToken).ConfigureAwait(false);
+                    Fixture.Check(keychain.Items[service] == Claude("saved", 1000) && ReadFile(directory) == Claude("saved", 1000), "A cleared Keychain login was not restored while sessions ran.");
+                    // Claude rejects the restored login and clears it again. The same saved version is not restored twice.
+                    keychain.Items[service] = cleared;
+                    await MacCredentialBridge.MaintainAsync(fixture.Store, profile.Id, keychain, cancellationToken).ConfigureAwait(false);
+                    Fixture.Check(keychain.Items[service] == cleared && keychain.Writes == 1, "A rejected saved login was restored repeatedly.");
+                    // A newer saved login, such as from a sign-in, is restored.
+                    WriteFile(directory, Claude("newer", 3000));
+                    await MacCredentialBridge.MaintainAsync(fixture.Store, profile.Id, keychain, cancellationToken).ConfigureAwait(false);
+                    Fixture.Check(keychain.Items[service] == Claude("newer", 3000), "A newer saved login was not restored.");
+                }
+            });
+            Add("ClaudeMaintenanceWaitsForSignIn", async (fixture, cancellationToken) =>
+            {
+                Profile profile = fixture.Add(HarnessKind.Claude, "signin@example.test", CredentialKind.Native);
+                string directory = fixture.Store.ProfileDirectory(profile.Id);
+                FakeKeychain keychain = new FakeKeychain();
+                keychain.Items[MacCredentialBridge.ServiceName(directory)] = "{\"claudeAiOauth\":{\"accessToken\":\"\",\"refreshToken\":\"\",\"expiresAt\":0}}";
+                WriteFile(directory, Claude("saved", 1000));
+                using (FileStream signIn = fixture.Store.AcquireSignInLease(profile.Id))
+                {
+                    Fixture.Check(fixture.Store.SignInRunning(profile.Id), "A running sign-in was not detected.");
+                    Fixture.Throws<InvalidOperationException>(() => fixture.Store.AcquireSignInLease(profile.Id));
+                    await MacCredentialBridge.MaintainAsync(fixture.Store, profile.Id, keychain, cancellationToken).ConfigureAwait(false);
+                }
+                Fixture.Check(keychain.Writes == 0 && !fixture.Store.SignInRunning(profile.Id), "Maintenance restored a saved login over a running sign-in.");
+            });
+            Add("ClaudeMaintenanceLeavesMissingAndLockedKeychainAlone", async (fixture, cancellationToken) =>
+            {
+                Profile profile = fixture.Add(HarnessKind.Claude, "missing@example.test", CredentialKind.Native);
+                string directory = fixture.Store.ProfileDirectory(profile.Id);
+                FakeKeychain keychain = new FakeKeychain();
+                WriteFile(directory, Claude("saved", 1000));
+                await MacCredentialBridge.MaintainAsync(fixture.Store, profile.Id, keychain, cancellationToken).ConfigureAwait(false);
+                keychain.Items[MacCredentialBridge.ServiceName(directory)] = Claude("live", 2000);
+                keychain.Locked = true;
+                await MacCredentialBridge.MaintainAsync(fixture.Store, profile.Id, keychain, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(keychain.Writes == 0 && ReadFile(directory) == Claude("saved", 1000), "Maintenance wrote a missing or unreadable Keychain item.");
+            });
+            Add("ClaudeAccountSurvivesClearedLogin", async (fixture, cancellationToken) =>
+            {
+                Profile profile = fixture.Add(HarnessKind.Claude, "account@example.test", CredentialKind.Native);
+                string directory = fixture.Store.ProfileDirectory(profile.Id);
+                FakeKeychain keychain = new FakeKeychain();
+                ClaudeAccount empty = await ClaudeAccount.ReadAsync(directory, keychain, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(empty.IsUnknown, "An empty profile reported an account.");
+                keychain.Items[MacCredentialBridge.ServiceName(directory)] = "{\"claudeAiOauth\":{\"accessToken\":\"\",\"refreshToken\":\"\",\"expiresAt\":0,\"accountUuid\":\"synthetic-account-a\"}}";
+                PrivateFiles.Write(Path.Combine(directory, ".claude.json"), "{\"oauthAccount\":{\"accountUuid\":\"synthetic-account-a\",\"emailAddress\":\"account@example.test\"}}");
+                ClaudeAccount before = await ClaudeAccount.ReadAsync(directory, keychain, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(before.Id == "synthetic-account-a" && before.Email == "account@example.test", "A cleared login lost its account.");
+                keychain.Items[MacCredentialBridge.ServiceName(directory)] = "{\"claudeAiOauth\":{\"accessToken\":\"synthetic-b\",\"refreshToken\":\"synthetic-b-refresh\",\"expiresAt\":5,\"accountUuid\":\"synthetic-account-b\"}}";
+                PrivateFiles.Write(Path.Combine(directory, ".claude.json"), "{\"oauthAccount\":{\"emailAddress\":\"other@example.test\"}}");
+                ClaudeAccount after = await ClaudeAccount.ReadAsync(directory, keychain, cancellationToken).ConfigureAwait(false);
+                Fixture.Check(after.Id == "synthetic-account-b" && ClaudeAccount.AreDifferent(before, after), "A sign-in to a different account was not detected.");
+                Fixture.Check(!ClaudeAccount.AreDifferent(before, new ClaudeAccount { Email = "ACCOUNT@example.test" }) && !ClaudeAccount.AreDifferent(before, empty)
+                    && ClaudeAccount.AreDifferent(new ClaudeAccount { Email = "a@example.test" }, new ClaudeAccount { Email = "b@example.test" }), "Account comparison is wrong.");
+            });
+
             foreach (HarnessKind harness in HarnessCatalog.All)
             {
                 Add(harness + "RefreshSurvivesRelaunch", (fixture, cancellationToken) => RelaunchAsync(fixture, harness, cancellationToken));
