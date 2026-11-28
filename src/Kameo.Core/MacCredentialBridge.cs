@@ -108,16 +108,31 @@ namespace Kameo.Core
                 && expiry.ValueKind == JsonValueKind.Number && expiry.TryGetInt64(out long milliseconds) ? milliseconds : 0;
         }
 
-        /// <summary>Deletes only the native keychain item belonging to an explicit Kameo profile directory.</summary>
+        /// <summary>
+        /// Deletes only the native keychain items belonging to an explicit Kameo profile directory: the one stored under
+        /// this user's account name and any others with the same service, such as one Claude saved under another name.
+        /// </summary>
         public static void DeleteScoped(string directory)
         {
             if (!OperatingSystem.IsMacOS()) return;
             ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+            string service = ServiceName(directory);
+            Delete(service, Account());
+            for (int attempt = 0; attempt < 8 && Delete(service, null); attempt++) { }
+        }
+
+        // Deletes one matching item and returns whether one existed.
+        private static bool Delete(string service, string? account)
+        {
             using Process process = new Process { StartInfo = new ProcessStartInfo("/usr/bin/security") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true } };
-            foreach (string argument in new[] { "delete-generic-password", "-s", ServiceName(directory), "-a", Account() }) process.StartInfo.ArgumentList.Add(argument);
+            process.StartInfo.ArgumentList.Add("delete-generic-password");
+            process.StartInfo.ArgumentList.Add("-s"); process.StartInfo.ArgumentList.Add(service);
+            if (account != null) { process.StartInfo.ArgumentList.Add("-a"); process.StartInfo.ArgumentList.Add(account); }
             process.Start();
             if (!process.WaitForExit(5000)) { process.Kill(true); throw new IOException("Keychain did not respond. Unlock it and retry."); }
-            if (process.ExitCode != 0 && process.ExitCode != _ItemNotFound) throw new IOException("The profile's Keychain entry could not be deleted. Unlock Keychain and retry.");
+            if (process.ExitCode == _ItemNotFound) return false;
+            if (process.ExitCode != 0) throw new IOException("The profile's Keychain entry could not be deleted. Unlock Keychain and retry.");
+            return true;
         }
 
         /// <summary>Reads an explicitly requested keychain service, or null when it cannot be read. Never logs the password or invokes a shell.</summary>
@@ -127,15 +142,28 @@ namespace Kameo.Core
             catch (IOException) { return null; }
         }
 
-        /// <summary>Reads a keychain service, returning null only when the item does not exist.</summary>
+        /// <summary>
+        /// Reads a keychain service, returning null only when the item does not exist. The item stored under this user's
+        /// account name, which Kameo writes and Claude Code reads, wins over others with the same service, such as a
+        /// stale one Claude saved under another name.
+        /// </summary>
         /// <exception cref="IOException">The Keychain was locked, denied access, or did not respond.</exception>
         internal static async Task<string?> ReadStrictAsync(string service, CancellationToken cancellationToken)
         {
             if (!OperatingSystem.IsMacOS()) throw new PlatformNotSupportedException("Keychain access is available on macOS only.");
+            return await FindAsync(service, Account(), cancellationToken).ConfigureAwait(false)
+                ?? await FindAsync(service, null, cancellationToken).ConfigureAwait(false);
+        }
+
+        private static async Task<string?> FindAsync(string service, string? account, CancellationToken cancellationToken)
+        {
             using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(30));
             using Process process = new Process { StartInfo = new ProcessStartInfo("/usr/bin/security") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true } };
-            foreach (string argument in new[] { "find-generic-password", "-s", service, "-w" }) process.StartInfo.ArgumentList.Add(argument);
+            process.StartInfo.ArgumentList.Add("find-generic-password");
+            process.StartInfo.ArgumentList.Add("-s"); process.StartInfo.ArgumentList.Add(service);
+            if (account != null) { process.StartInfo.ArgumentList.Add("-a"); process.StartInfo.ArgumentList.Add(account); }
+            process.StartInfo.ArgumentList.Add("-w");
             process.Start();
             try
             {
