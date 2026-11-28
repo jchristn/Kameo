@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/logo-dark.png" width="240" alt="Kameo chameleon logo" /></p>
 
-<p align="center"><strong>v0.2.2 · Alpha</strong></p>
+<p align="center"><strong>v0.2.3 · Alpha</strong></p>
 
 # Kameo
 
@@ -161,7 +161,7 @@ With the .NET 10 SDK installed, run these commands from the clone's root. They w
 
 ```sh
 dotnet pack src/Kameo.Cli/Kameo.Cli.csproj -c Release -o artifacts/packages
-dotnet tool install --global Kameo.Cli --version 0.2.2 --source ./artifacts/packages
+dotnet tool install --global Kameo.Cli --version 0.2.3 --source ./artifacts/packages
 kameo --version
 ```
 
@@ -185,12 +185,12 @@ For future terminals, add `~/.dotnet/tools` to your shell's `PATH`, or `%USERPRO
 
 You can now change to any project directory and run `kameo list`, `kameo codex`, or another harness command. The global CLI uses the same `~/.kameo/` profiles as the desktop, or the directory selected by `KAMEO_HOME`. It runs independently of the clone after installation.
 
-To install a rebuilt copy, run the following from the clone's root. During the alpha, builds retain version `0.2.2`, so uninstall and reinstall to replace that version rather than relying on a version-based update:
+To install a rebuilt copy, run the following from the clone's root. During the alpha, builds retain version `0.2.3`, so uninstall and reinstall to replace that version rather than relying on a version-based update:
 
 ```sh
 dotnet pack src/Kameo.Cli/Kameo.Cli.csproj -c Release -o artifacts/packages
 dotnet tool uninstall --global Kameo.Cli
-dotnet tool install --global Kameo.Cli --version 0.2.2 --source ./artifacts/packages --no-http-cache
+dotnet tool install --global Kameo.Cli --version 0.2.3 --source ./artifacts/packages --no-http-cache
 ```
 
 The platform `update` scripts rebuild the source outputs; they do not replace an installed global tool. To remove just the global command, run `dotnet tool uninstall --global Kameo.Cli`. Your profiles and credentials remain intact. See Microsoft's [.NET tools guide](https://learn.microsoft.com/en-us/dotnet/core/tools/global-tools) for global-tool installation details.
