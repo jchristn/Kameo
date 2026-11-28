@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/logo-dark.png" width="240" alt="Kameo chameleon logo" /></p>
 
-<p align="center"><strong>v0.2.0 · Alpha</strong></p>
+<p align="center"><strong>v0.2.1 · Alpha</strong></p>
 
 # Kameo
 
@@ -161,7 +161,7 @@ With the .NET 10 SDK installed, run these commands from the clone's root. They w
 
 ```sh
 dotnet pack src/Kameo.Cli/Kameo.Cli.csproj -c Release -o artifacts/packages
-dotnet tool install --global Kameo.Cli --version 0.2.0 --source ./artifacts/packages
+dotnet tool install --global Kameo.Cli --version 0.2.1 --source ./artifacts/packages
 kameo --version
 ```
 
@@ -185,12 +185,12 @@ For future terminals, add `~/.dotnet/tools` to your shell's `PATH`, or `%USERPRO
 
 You can now change to any project directory and run `kameo list`, `kameo codex`, or another harness command. The global CLI uses the same `~/.kameo/` profiles as the desktop, or the directory selected by `KAMEO_HOME`. It runs independently of the clone after installation.
 
-To install a rebuilt copy, run the following from the clone's root. During the alpha, builds retain version `0.2.0`, so uninstall and reinstall to replace that version rather than relying on a version-based update:
+To install a rebuilt copy, run the following from the clone's root. During the alpha, builds retain version `0.2.1`, so uninstall and reinstall to replace that version rather than relying on a version-based update:
 
 ```sh
 dotnet pack src/Kameo.Cli/Kameo.Cli.csproj -c Release -o artifacts/packages
 dotnet tool uninstall --global Kameo.Cli
-dotnet tool install --global Kameo.Cli --version 0.2.0 --source ./artifacts/packages --no-http-cache
+dotnet tool install --global Kameo.Cli --version 0.2.1 --source ./artifacts/packages --no-http-cache
 ```
 
 The platform `update` scripts rebuild the source outputs; they do not replace an installed global tool. To remove just the global command, run `dotnet tool uninstall --global Kameo.Cli`. Your profiles and credentials remain intact. See Microsoft's [.NET tools guide](https://learn.microsoft.com/en-us/dotnet/core/tools/global-tools) for global-tool installation details.
@@ -288,7 +288,7 @@ Run `kameo --help` for the full command list. `KAMEO_HOME` or `kameo --home /abs
 
 ### Antigravity Google accounts and API keys
 
-Install [Antigravity CLI](https://antigravity.google/docs/install?tab=cli) separately. **Google account profiles require CLI 1.5.7**; check `agy --version`. Kameo checks this version before each account session because account isolation relies on internal CLI behavior. Other versions are rejected until their behavior is verified and supported by Kameo.
+Install [Antigravity CLI](https://antigravity.google/docs/install?tab=cli) separately. **Google account profiles require CLI 1.5.7 or a later 1.5.x release**; check `agy --version`. Kameo checks this version before each account session because account isolation relies on internal CLI behavior. Other versions, including 1.6 and later, are rejected until their behavior is verified and supported by Kameo.
 
 1. Add an **Antigravity → Google account** profile, give it a name, and save.
 2. Click **Sign in**. Follow the URL in the terminal, choose the Google account, and paste the returned authorization code into **that terminal**. The code is not an API key and does not belong in Kameo's API-key field.
@@ -334,7 +334,7 @@ kameo edit prf_REPLACE_WITH_ID --endpoints-file /absolute/path/to/endpoints.json
 | --- | --- | --- |
 | Claude Code | `CLAUDE_CONFIG_DIR`, `CLAUDE_SECURESTORAGE_CONFIG_DIR`, profile-local `ANTHROPIC_CONFIG_DIR` | `.credentials.json`; scoped Keychain bridge on macOS |
 | Codex | `CODEX_HOME`, file credential storage | `auth.json` |
-| Antigravity | Isolated account token file and settings, or selected API key supplied to `agy` | Google accounts require CLI 1.5.7; legacy login files are preserved |
+| Antigravity | Isolated account token file and settings, or selected API key supplied to `agy` | Google accounts require CLI 1.5.7 or a later 1.5.x; legacy login files are preserved |
 | Mux | `MUX_CONFIG_DIR` | `endpoints.json`, imported or refreshed from a shared source |
 
 Kameo keeps a stable native directory for each profile, allowing the harness to refresh its own tokens and retain its profile-specific state. It does not copy refreshed tokens back into the original imported login. On macOS, Claude keeps each profile's login in a directory-scoped Keychain entry. Kameo copies it to the profile's file at every launch and exit, and restores the file only when the entry is missing, cleared, or older, so a login refreshed in one window is never replaced by an older copy. Closing a terminal window stops the session cleanly. Other harnesses keep their logins in the profile directory itself. Deleting that profile also removes its scoped Keychain entry, leaving the default login alone.
@@ -406,7 +406,7 @@ Touchstone descriptors in `Test.Shared` run through the console, xUnit v3, NUnit
 
 ## AOT support
 
-`Kameo.Core` and `Kameo.Cli` are AOT compatible. `Test.Aot` runs every shared core suite without exclusions as a native binary. For example, on Apple Silicon:
+`Kameo.Core`, `Kameo.Cli`, and `Kameo.Publisher` are AOT compatible. They use no source generators or partial types: regular expressions are constructed at startup and `publisher.json` is read with a hand-written `JsonDocument` mapper, so nothing depends on reflection. `Test.Aot` runs every shared core suite without exclusions as a native binary. For example, on Apple Silicon:
 
 ```sh
 dotnet publish src/Test.Aot -c Release -r osx-arm64 -o artifacts/aot

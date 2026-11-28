@@ -44,7 +44,7 @@ namespace Kameo.Cli
         private static async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken)
         {
             if (args.Length == 0 || args[0] is "help" or "--help" or "-h") { Help(); return 0; }
-            if (args[0] == "--version") { Console.WriteLine("Kameo 0.2.0 (alpha)"); return 0; }
+            if (args[0] == "--version") { Console.WriteLine(ProductInfo.Name + " " + ProductInfo.Version + " (" + ProductInfo.Stage + ")"); return 0; }
             string? root = null;
             if (args[0] == "--home") { Require(args, 3); root = args[1]; args = args[2..]; }
             ProfileStore store = new ProfileStore(root);
@@ -106,7 +106,7 @@ namespace Kameo.Cli
             string[] targets = args.Skip(1).Where(argument => !argument.StartsWith("--", StringComparison.Ordinal)).ToArray();
             if (targets.Length > 1 || args.Skip(1).Any(argument => argument.StartsWith("--", StringComparison.Ordinal) && argument is not "--json" and not "--offline"))
                 throw new ArgumentException("Usage: kameo usage [claude|codex|ID] [--offline] [--json]");
-            UsageService usage = new UsageService(store);
+            using UsageService usage = new UsageService(store);
             IReadOnlyList<UsageReport> reports;
             bool single = targets.Length == 1 && targets[0].StartsWith("prf_", StringComparison.Ordinal);
             if (single) reports = new[] { await usage.ReadAsync(targets[0], offline, cancellationToken).ConfigureAwait(false) };
@@ -187,8 +187,7 @@ namespace Kameo.Cli
             if (index + 1 >= args.Length) throw new ArgumentException("Missing value for " + name + ".");
             return args[index + 1];
         }
-        private static void Help() => Console.WriteLine("""
-            Kameo 0.2.0 (alpha) - switch identities, keep your workflow.
+        private static void Help() => Console.WriteLine(ProductInfo.Name + " " + ProductInfo.Version + " (" + ProductInfo.Stage + ") - switch identities, keep your workflow." + Environment.NewLine + """
 
             kameo [--home PATH] COMMAND
               list                                     List profiles (* = selected)

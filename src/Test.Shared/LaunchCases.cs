@@ -159,7 +159,7 @@ namespace Test.Shared
             cases.Add(KameoSuites.Case("Launch", "FailedStartReleasesLease", async (fixture, cancellationToken) =>
             {
                 Profile profile = fixture.Add(); profile.Executable = Path.Combine(fixture.Root, "does-not-exist"); fixture.Store.Update(profile);
-                try { await new LaunchService(fixture.Store).RunAsync(profile.Id, Array.Empty<string>(), false, cancellationToken).ConfigureAwait(false); throw new InvalidOperationException("Expected launch failure."); }
+                try { await new LaunchService(fixture.Store).RunAsync(profile.Id, Array.Empty<string>(), false, cancellationToken).ConfigureAwait(false); throw new TestFailureException("Expected launch failure."); }
                 catch (FileNotFoundException) { }
                 profile.Executable = "codex"; fixture.Store.Update(profile);
             }));
@@ -173,7 +173,7 @@ namespace Test.Shared
                 Fixture.Check(data["environment"]?["OPENAI_API_KEY"]?.GetValue<string>() == "synthetic-test-key", "Child got the wrong key.");
                 Fixture.Check(data["environment"]?["CODEX_HOME"]?.GetValue<string>() == fixture.Store.ProfileDirectory(profile.Id), "Child got the wrong home.");
                 Fixture.Check(data["arguments"]!.AsArray().Any(value => value?.GetValue<string>() == "$(not-a-shell)"), "Argument was interpreted by a shell.");
-                Fixture.Check(data["arguments"]!.AsArray().Last()?.GetValue<string>() == "", "Empty argument was lost.");
+                Fixture.Check(data["arguments"]!.AsArray().LastOrDefault()?.GetValue<string>() == "", "Empty argument was lost.");
             }));
             cases.Add(KameoSuites.Case("Launch", "CancellationPreservesSiblingLease", async (fixture, cancellationToken) =>
             {

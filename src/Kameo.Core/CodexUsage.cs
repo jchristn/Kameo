@@ -74,13 +74,13 @@ namespace Kameo.Core
                 timeout.CancelAfter(liveTimeout);
                 using Process process = new Process { StartInfo = start };
                 process.Start();
-                Task errors = DrainAsync(process.StandardError);
+                Task errors = DrainAsync(process.StandardError, cancellationToken);
                 try
                 {
                     JsonObject initialize = new JsonObject
                     {
                         ["id"] = 1, ["method"] = "initialize",
-                        ["params"] = new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "kameo", ["title"] = "Kameo", ["version"] = "0.2.0" } }
+                        ["params"] = new JsonObject { ["clientInfo"] = new JsonObject { ["name"] = "kameo", ["title"] = "Kameo", ["version"] = ProductInfo.Version } }
                     };
                     await SendAsync(process, initialize, timeout.Token).ConfigureAwait(false);
                     using (JsonDocument ignored = await ResponseAsync(process, 1, timeout.Token).ConfigureAwait(false)) { }
@@ -222,11 +222,11 @@ namespace Kameo.Core
             return text.Length == 0 ? "Codex could not report usage." : char.ToUpperInvariant(text[0]) + text[1..] + (text.EndsWith('.') ? "" : ".");
         }
 
-        private static async Task DrainAsync(StreamReader reader)
+        private static async Task DrainAsync(StreamReader reader, CancellationToken cancellationToken)
         {
             char[] buffer = new char[4096];
-            try { while (await reader.ReadAsync(buffer, CancellationToken.None).ConfigureAwait(false) > 0) { } }
-            catch (Exception error) when (error is IOException or ObjectDisposedException or InvalidOperationException) { }
+            try { while (await reader.ReadAsync(buffer, cancellationToken).ConfigureAwait(false) > 0) { } }
+            catch (Exception error) when (error is IOException or ObjectDisposedException or InvalidOperationException or OperationCanceledException) { }
         }
 
         internal static string PlanName(string? planType)

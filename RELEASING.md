@@ -17,8 +17,9 @@ followed by the version's `CHANGELOG.md` section. Releases get the **Latest** ba
 ## Steps
 
 1. **Choose the version (human decision).** Agents never change versions on their own. The version lives only in
-   `Directory.Build.props` (`<Version>`). Also update the `--version` text in `src/Kameo.Cli/Program.cs`, the version
-   shown in the desktop About window, `assets/Info.plist` (source builds), and the README status line.
+   `Directory.Build.props` (`<Version>`); the CLI `--version` text, the desktop About window and sidebar, and outbound
+   user agents read it through `Kameo.Core.ProductInfo`. Also update `assets/Info.plist` (source builds), the README
+   status line and tool-install commands, the `INSTALL.md` example, `docs/ARCHITECTURE.md`, and `AGENTS.md`.
 2. **Update `CHANGELOG.md`.** Move the entries under `## [Unreleased]` into `## [<version>] - <date>` and leave an
    empty `## [Unreleased]` above it. The heading must start with exactly `## [<version>]`.
 3. **Build your OS's installers locally (optional).** `./build-installers.sh` on macOS or Linux, `build-installers.bat`

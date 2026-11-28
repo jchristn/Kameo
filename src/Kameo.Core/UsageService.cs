@@ -11,9 +11,10 @@ namespace Kameo.Core
     /// <summary>
     /// Reads subscription plan limits for native Claude Code and Codex profiles, and never logs credentials. A Claude Code
     /// sign-in that is about to expire is renewed when no session is using its profile; Codex renews its own. Instances
-    /// are safe for concurrent callers.
+    /// are safe for concurrent callers. Dispose the instance when finished; disposing never affects the process-wide
+    /// HTTP client used by the public constructor.
     /// </summary>
-    public sealed class UsageService
+    public sealed class UsageService : IDisposable
     {
         private static readonly Lazy<HttpClient> _SharedClient = new Lazy<HttpClient>(() => new HttpClient { Timeout = Timeout.InfiniteTimeSpan });
         private readonly ProfileStore _Store;
@@ -23,6 +24,9 @@ namespace Kameo.Core
         private readonly IClaudeKeychain? _Keychain;
         private readonly TimeProvider _Clock;
         private readonly TimeSpan _CodexTimeout;
+        private readonly bool _OwnsClient;
+        private int _Disposed;
+        private int _MaxConcurrentReads = 4;
 
         /// <summary>Creates a usage reader for a profile store.</summary>
         public UsageService(ProfileStore store) : this(store, null, null, null, null, null, OperatingSystem.IsMacOS() ? new SecurityKeychain() : null) { }
@@ -32,12 +36,29 @@ namespace Kameo.Core
             Uri? tokenEndpoint = null, IClaudeKeychain? keychain = null)
         {
             _Store = store ?? throw new ArgumentNullException(nameof(store));
+            _OwnsClient = handler != null;
             _Client = handler == null ? _SharedClient.Value : new HttpClient(handler, false) { Timeout = Timeout.InfiniteTimeSpan };
             _ClaudeEndpoint = claudeEndpoint ?? ClaudeUsage.DefaultEndpoint;
             _TokenEndpoint = tokenEndpoint ?? ClaudeTokenRefresh.DefaultEndpoint;
             _Keychain = keychain;
             _Clock = clock ?? TimeProvider.System;
             _CodexTimeout = codexTimeout ?? CodexUsage.LiveTimeout;
+        }
+
+        /// <summary>
+        /// The most profiles <see cref="ReadAllAsync"/> checks at once. Default 4, minimum 1, maximum 64. Higher values
+        /// finish a large profile list sooner but start more provider requests and Codex child processes together.
+        /// </summary>
+        /// <exception cref="ArgumentOutOfRangeException">The value is below 1 or above 64.</exception>
+        public int MaxConcurrentReads
+        {
+            get => _MaxConcurrentReads;
+            set
+            {
+                ArgumentOutOfRangeException.ThrowIfLessThan(value, 1);
+                ArgumentOutOfRangeException.ThrowIfGreaterThan(value, 64);
+                _MaxConcurrentReads = value;
+            }
         }
 
         /// <summary>Whether a profile can report plan usage: a native Claude Code or Codex login.</summary>
@@ -68,8 +89,10 @@ namespace Kameo.Core
         /// <param name="offline">True to use only local data: Codex session logs. No network or child process is used, and nothing is renewed.</param>
         /// <param name="cancellationToken">Cancels the check.</param>
         /// <exception cref="KeyNotFoundException">The profile does not exist.</exception>
+        /// <exception cref="ObjectDisposedException">The instance was disposed.</exception>
         public async Task<UsageReport> ReadAsync(string id, bool offline, CancellationToken cancellationToken)
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _Disposed) != 0, this);
             cancellationToken.ThrowIfCancellationRequested();
             Profile profile = _Store.Get(id);
             if (!HarnessCatalog.SupportsUsage(profile.Harness))
@@ -99,7 +122,7 @@ namespace Kameo.Core
         public async Task<IReadOnlyList<UsageReport>> ReadAllAsync(HarnessKind? harness, bool offline, CancellationToken cancellationToken)
         {
             List<Profile> profiles = _Store.List().Where(profile => HarnessCatalog.SupportsUsage(profile.Harness) && (harness == null || profile.Harness == harness)).ToList();
-            using SemaphoreSlim gate = new SemaphoreSlim(4);
+            using SemaphoreSlim gate = new SemaphoreSlim(_MaxConcurrentReads);
             Task<UsageReport>[] checks = profiles.Select(async profile =>
             {
                 await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -108,6 +131,18 @@ namespace Kameo.Core
                 finally { gate.Release(); }
             }).ToArray();
             return await Task.WhenAll(checks).ConfigureAwait(false);
+        }
+
+        /// <summary>Releases the HTTP client this instance created. The shared client is never disposed. Safe to call more than once.</summary>
+        public void Dispose()
+        {
+            Dispose(true);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (Interlocked.Exchange(ref _Disposed, 1) != 0) return;
+            if (disposing && _OwnsClient) _Client.Dispose();
         }
     }
 }

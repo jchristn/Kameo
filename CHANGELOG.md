@@ -4,6 +4,16 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-27
+
+Alpha. Code-standard compliance; no behavior changes for users.
+
+- The version shown by `kameo --version`, the desktop About window and sidebar, and Kameo's outbound user agents now comes from the build, so a release changes it in one place.
+- Removed every `partial` type. Regular expressions are constructed once at startup instead of source-generated, and `publisher.json` is read by a hand-written mapper that keeps native AOT support and now names the exact property when a value is unknown or has the wrong type.
+- `UsageService` is disposable and releases any HTTP client it creates; the CLI, desktop, and tests dispose it. `UsageService.MaxConcurrentReads` (default 4, range 1 to 64) sets how many profiles a full usage check reads at once.
+- Asynchronous helpers accept cancellation tokens, a bare `catch` was replaced with `try`/`finally`, test assertions throw a dedicated `TestFailureException` so a test can no longer swallow its own failure, and private members no longer carry XML documentation.
+- Documentation: Antigravity Google account profiles accept CLI 1.5.7 or any later 1.5.x release, as they have since 0.1.1.
+
 ## [0.2.0] - 2026-11-26
 
 Alpha. Sign-ins that stay valid, and launch options.

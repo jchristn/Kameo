@@ -16,8 +16,11 @@ namespace Kameo.Core
     /// Reads Claude subscription limits with the profile's saved access token. When the sign-in is about to expire or is
     /// rejected, and no session is using the profile, it is renewed first through <see cref="ClaudeTokenRefresh"/>.
     /// </summary>
-    internal static partial class ClaudeUsage
+    internal static class ClaudeUsage
     {
+
+        private static readonly Regex _Multiplier = new Regex("_(\\d+x)$", RegexOptions.CultureInvariant);
+
         internal static readonly Uri DefaultEndpoint = new Uri("https://api.anthropic.com/api/oauth/usage");
         private const string _OAuthBeta = "oauth-2025-04-20";
         private const int _MaximumResponseBytes = 1024 * 1024;
@@ -123,7 +126,7 @@ namespace Kameo.Core
             catch (JsonException) { return new ClaudeSavedLogin { Problem = UsageReport.For(profile, UsageStatus.Unavailable, "The saved login is not valid JSON. Sign in again or re-import it.") }; }
         }
 
-        /// <summary>Returns the usage response body, or null after passing a display-safe report to <paramref name="fail"/>.</summary>
+        // Returns the usage response body, or null after passing a display-safe report to fail.
         private static async Task<string?> QueryAsync(Profile profile, HttpClient client, Uri endpoint, ClaudeSavedLogin login, CancellationToken cancellationToken, Action<UsageReport> fail)
         {
             using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -132,7 +135,7 @@ namespace Kameo.Core
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", login.AccessToken);
             request.Headers.Add("anthropic-beta", _OAuthBeta);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            request.Headers.UserAgent.Add(new ProductInfoHeaderValue("Kameo", "0.2.0"));
+            request.Headers.UserAgent.Add(new ProductInfoHeaderValue(ProductInfo.Name, ProductInfo.Version));
             string message;
             UsageStatus status = UsageStatus.Unavailable;
             try
@@ -208,7 +211,7 @@ namespace Kameo.Core
             if (subscription == null) return "";
             string plan = char.ToUpperInvariant(subscription[0]) + subscription[1..].ToLowerInvariant();
             string? tier = Text(oauth, "rateLimitTier");
-            Match multiplier = tier == null ? Match.Empty : Multiplier().Match(tier);
+            Match multiplier = tier == null ? Match.Empty : _Multiplier.Match(tier);
             return multiplier.Success ? plan + " " + multiplier.Groups[1].Value : plan;
         }
 
@@ -251,8 +254,5 @@ namespace Kameo.Core
             }
             return System.Text.Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
         }
-
-        [GeneratedRegex("_(\\d+x)$", RegexOptions.CultureInvariant)]
-        private static partial Regex Multiplier();
     }
 }

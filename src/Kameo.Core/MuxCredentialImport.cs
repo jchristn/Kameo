@@ -5,8 +5,11 @@ namespace Kameo.Core
     using System.Text.RegularExpressions;
 
     /// <summary>Captures explicit Mux credential environment references into an imported profile.</summary>
-    public static partial class MuxCredentialImport
+    public static class MuxCredentialImport
     {
+
+        private static readonly Regex _References = new Regex(@"\$\{(?<braced>[A-Za-z_][A-Za-z0-9_]*)\}|%(?<percent>[A-Za-z_][A-Za-z0-9_]*)%|\$(?:env:)?(?<bare>[A-Za-z_][A-Za-z0-9_]*)", RegexOptions.CultureInvariant);
+
         /// <summary>Resolves endpoint API keys and headers so future launches do not depend on the importing shell's account.</summary>
         /// <exception cref="InvalidOperationException">A referenced credential variable is unavailable.</exception>
         public static string Resolve(string rawCredentialJson, Func<string, string?> readEnvironment)
@@ -38,13 +41,9 @@ namespace Kameo.Core
             return changed ? root.ToJsonString() : rawCredentialJson;
         }
 
-        private static string ResolveValue(string value, Func<string, string?> readEnvironment) => References().Replace(value, match =>
+        private static string ResolveValue(string value, Func<string, string?> readEnvironment) => _References.Replace(value, match =>
         {
             string variable = match.Groups["braced"].Success ? match.Groups["braced"].Value : match.Groups["percent"].Success ? match.Groups["percent"].Value : match.Groups["bare"].Value;
             return readEnvironment(variable) ?? throw new InvalidOperationException("The imported Mux credential references an unset environment variable: " + variable + ". Set it before importing, or use an API-key profile.");
-        });
-
-        [GeneratedRegex(@"\$\{(?<braced>[A-Za-z_][A-Za-z0-9_]*)\}|%(?<percent>[A-Za-z_][A-Za-z0-9_]*)%|\$(?:env:)?(?<bare>[A-Za-z_][A-Za-z0-9_]*)", RegexOptions.CultureInvariant)]
-        private static partial Regex References();
-    }
+        });    }
 }

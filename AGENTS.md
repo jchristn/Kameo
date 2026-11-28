@@ -2,10 +2,11 @@
 
 Kameo is a local C#/.NET 10 desktop and CLI application. Source and tests belong under `src/`.
 
-- Preserve version `0.2.0` unless the user explicitly requests a version change. Alpha is indicated in documentation and the UI.
+- Preserve version `0.2.1` unless the user explicitly requests a version change. Alpha is indicated in documentation and the UI.
 - Follow the coding model in `~/Code/Agents/requirements` where applicable to a local desktop application. The user explicitly chose C#/Avalonia, plaintext local credentials, and independent Windows/WSL installations. Source builds remain supported; unsigned installers are built by `Kameo.Publisher` per `~/Code/Agents/requirements/INSTALLERS.md`.
 - Namespace blocks come first; usings go inside. System usings first, then other namespaces, alphabetically.
-- Use explicit types, nullable reference types, one class/enum per file, XML documentation for public APIs, and `_PascalCase` private fields. Avoid tuples and em dashes.
+- Use explicit types (never `var`), nullable reference types, one class/enum per file, XML documentation for public APIs (and none on private members), and `_PascalCase` private fields. No tuples, no `partial` types (so no `[GeneratedRegex]` or `JsonSerializerContext` source generation), and no em dashes.
+- The product version comes from the assembly through `Kameo.Core.ProductInfo`; never hardcode it in code. Classes that own disposable objects implement `IDisposable`.
 - Async operations accept cancellation tokens except framework-mandated entry points. Use `ConfigureAwait(false)` outside UI code.
 - Never log credentials, raw credential documents, child environments, or command lines containing secrets. Tests use synthetic credentials only.
 - Keep metadata in structured SQLite tables. Vendor credential JSON is intentionally opaque and stored in native profile files. Do not introduce serialized metadata blobs.

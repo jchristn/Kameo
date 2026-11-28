@@ -54,7 +54,7 @@ namespace Kameo.Desktop
                 List<Profile> harnessProfiles = profiles.Where(profile => profile.Harness == harness).ToList();
                 if (MainWindow.OffersLowestUsage(harness, harnessProfiles))
                 {
-                    choices.Add(NativeMenus.Item("Lowest usage...", () => _ = LaunchLowestAsync(harness)));
+                    choices.Add(NativeMenus.Item("Lowest usage...", () => _ = LaunchLowestAsync(harness, CancellationToken.None)));
                     choices.Add(new NativeMenuItemSeparator());
                 }
                 foreach (Profile profile in harnessProfiles)
@@ -64,7 +64,7 @@ namespace Kameo.Desktop
                     use.IsChecked = profile.IsActive;
                     use.IsEnabled = !profile.IsActive;
                     NativeMenuItem item = NativeMenus.Submenu(profile.Name,
-                        NativeMenus.Item("Launch...", () => _ = LaunchAsync(profile.Id)),
+                        NativeMenus.Item("Launch...", () => _ = LaunchAsync(profile.Id, CancellationToken.None)),
                         new NativeMenuItemSeparator(),
                         use);
                     // The tick marks the profile that kameo commands and other launch shortcuts use.
@@ -85,16 +85,16 @@ namespace Kameo.Desktop
             _Window.ShowAbout();
         }
 
-        private async Task LaunchAsync(string id)
+        private async Task LaunchAsync(string id, CancellationToken cancellationToken)
         {
             // Only the options dialog comes forward, even when the manager is open behind other apps. The manager is
             // shown only so a failure message is visible.
-            if (!await _Window.LaunchProfileAsync(id, true, CancellationToken.None)) _Show();
+            if (!await _Window.LaunchProfileAsync(id, true, cancellationToken)) _Show();
         }
 
-        private async Task LaunchLowestAsync(HarnessKind harness)
+        private async Task LaunchLowestAsync(HarnessKind harness, CancellationToken cancellationToken)
         {
-            if (!await _Window.LaunchLowestAsync(harness, true, CancellationToken.None)) _Show();
+            if (!await _Window.LaunchLowestAsync(harness, true, cancellationToken)) _Show();
         }
 
         private void Select(Profile profile)

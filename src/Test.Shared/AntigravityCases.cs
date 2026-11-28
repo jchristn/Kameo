@@ -127,7 +127,7 @@ namespace Test.Shared
                     Profile profile = Account(fixture); new CredentialFiles(fixture.Store).ImportText(profile.Id, CredentialCases.Document(HarnessKind.Antigravity));
                     File.WriteAllText(Path.Combine(fixture.Root, "probe-version.txt"), version);
                     string capture = Path.Combine(fixture.Root, "must-not-start.json");
-                    try { await new LaunchService(fixture.Store).RunAsync(profile.Id, new[] { "--capture", capture }, false, cancellationToken).ConfigureAwait(false); throw new Exception("Unsupported CLI launched."); }
+                    try { await new LaunchService(fixture.Store).RunAsync(profile.Id, new[] { "--capture", capture }, false, cancellationToken).ConfigureAwait(false); throw new TestFailureException("Unsupported CLI launched."); }
                     catch (InvalidOperationException error) { Fixture.Check(!error.Message.Contains("synthetic-secret-version-output", StringComparison.Ordinal), "Version probe output leaked."); }
                     Fixture.Check(!File.Exists(capture) && File.ReadAllText(Token(fixture, profile)) == CredentialCases.Document(HarnessKind.Antigravity), "A rejected version started or changed credentials.");
                     fixture.Store.Update(profile);
@@ -137,14 +137,14 @@ namespace Test.Shared
             {
                 Profile profile = Account(fixture); File.WriteAllText(Path.Combine(fixture.Root, "probe-version.txt"), "hang");
                 using CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); cancellation.CancelAfter(200);
-                try { await new LaunchService(fixture.Store).RunAsync(profile.Id, Array.Empty<string>(), false, cancellation.Token).ConfigureAwait(false); throw new Exception("Version probe was not canceled."); }
+                try { await new LaunchService(fixture.Store).RunAsync(profile.Id, Array.Empty<string>(), false, cancellation.Token).ConfigureAwait(false); throw new TestFailureException("Version probe was not canceled."); }
                 catch (OperationCanceledException) { }
                 fixture.Store.Update(profile);
             });
             AddAsync("VersionProbeTimeoutIsActionable", async (fixture, cancellationToken) =>
             {
                 Profile profile = Account(fixture); File.WriteAllText(Path.Combine(fixture.Root, "probe-version.txt"), "hang");
-                try { await new LaunchService(fixture.Store).RunAsync(profile.Id, Array.Empty<string>(), false, cancellationToken).ConfigureAwait(false); throw new Exception("Version probe did not time out."); }
+                try { await new LaunchService(fixture.Store).RunAsync(profile.Id, Array.Empty<string>(), false, cancellationToken).ConfigureAwait(false); throw new TestFailureException("Version probe did not time out."); }
                 catch (InvalidOperationException error) { Fixture.Check(error.Message.Contains("timed out", StringComparison.Ordinal), "Timeout was not explained."); }
                 fixture.Store.Update(profile);
             });

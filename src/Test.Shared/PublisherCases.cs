@@ -83,7 +83,7 @@ namespace Test.Shared
             try
             {
                 ManifestLoader.Parse("{ \"project\": { \"name\": \"X\" }, \"runtimes\": [ \"freebsd-x64\" ] }");
-                throw new InvalidOperationException("An incomplete manifest was accepted.");
+                throw new TestFailureException("An incomplete manifest was accepted.");
             }
             catch (PublisherException error)
             {
@@ -97,6 +97,14 @@ namespace Test.Shared
             string badChannel = PublisherFixture.ManifestJson.Replace("\"zip\",", "\"msix\",", StringComparison.Ordinal);
             Fixture.Throws<PublisherException>(() => ManifestLoader.Parse(badChannel));
             Fixture.Check(ManifestLoader.Parse(PublisherFixture.ManifestJson).Artifacts.Count == 2, "The synthetic manifest should parse.");
+            Fixture.Throws<PublisherException>(() => ManifestLoader.Parse("{ \"project\": { \"unexpected\": \"x\" } }"));
+            Fixture.Throws<PublisherException>(() => ManifestLoader.Parse("{ \"framework\": 10 }"));
+            Fixture.Throws<PublisherException>(() => ManifestLoader.Parse("{ \"runtimes\": \"win-x64\" }"));
+            Fixture.Throws<PublisherException>(() => ManifestLoader.Parse("{ \"prereleaseBeforeOne\": \"false\" }"));
+            Fixture.Throws<PublisherException>(() => ManifestLoader.Parse("{ \"Framework\": \"net10.0\" }"));
+            PublisherManifest commented = ManifestReader.Read("{ // comment\n \"framework\": \"net10.0\", \"prereleaseBeforeOne\": false, }");
+            Fixture.Check(commented.Framework == "net10.0" && !commented.PrereleaseBeforeOne && commented.Project.LicenseFile == "LICENSE.md",
+                "Comments, trailing commas, and defaults should be honored.");
         }
 
         private static void RuntimeTargets()
@@ -295,7 +303,7 @@ namespace Test.Shared
             try
             {
                 ReleaseChannel.VerifyAssets(context);
-                throw new InvalidOperationException("An incomplete release passed verification.");
+                throw new TestFailureException("An incomplete release passed verification.");
             }
             catch (PublisherException error)
             {

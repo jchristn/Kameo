@@ -4,7 +4,6 @@ namespace Kameo.Publisher
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
-    using System.Text.Json;
 
     /// <summary>Loads and validates publisher.json.</summary>
     public static class ManifestLoader
@@ -26,10 +25,7 @@ namespace Kameo.Publisher
         public static PublisherManifest Parse(string json)
         {
             ArgumentNullException.ThrowIfNull(json);
-            PublisherManifest? manifest;
-            try { manifest = JsonSerializer.Deserialize(json, PublisherManifestContext.Default.PublisherManifest); }
-            catch (JsonException error) { throw new PublisherException("publisher.json is not valid: " + error.Message, error); }
-            if (manifest == null) throw new PublisherException("publisher.json is empty.");
+            PublisherManifest manifest = ManifestReader.Read(json);
             Validate(manifest);
             return manifest;
         }

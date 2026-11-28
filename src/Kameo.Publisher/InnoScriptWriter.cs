@@ -122,7 +122,7 @@ namespace Kameo.Publisher
             return script.ToString();
         }
 
-        private static IEnumerable<string> PathCode() => new[]
+        private static string[] PathCode() => new[]
         {
             "const EnvironmentKey = 'SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment';",
             "",

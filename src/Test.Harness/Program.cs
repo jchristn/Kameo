@@ -10,7 +10,7 @@ namespace Test.Harness
     {
         private static async Task<int> Main(string[] args)
         {
-            if (Array.IndexOf(args, "app-server") >= 0) return await AppServerAsync(args).ConfigureAwait(false);
+            if (Array.IndexOf(args, "app-server") >= 0) return await AppServerAsync(args, CancellationToken.None).ConfigureAwait(false);
             if (Array.IndexOf(args, "--version") >= 0)
             {
                 string home = Environment.GetEnvironmentVariable("KAMEO_HOME") ?? throw new InvalidOperationException("The fixture requires an isolated home.");
@@ -47,7 +47,7 @@ namespace Test.Harness
                 await File.WriteAllTextAsync(path, document.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
             }
             int refreshed = Array.IndexOf(args, "--write-credential");
-            if (refreshed >= 0) await WriteCredentialAsync(args, args[refreshed + 1]).ConfigureAwait(false);
+            if (refreshed >= 0) await WriteCredentialAsync(args, args[refreshed + 1], CancellationToken.None).ConfigureAwait(false);
             int sleep = Array.IndexOf(args, "--sleep");
             if (sleep >= 0) await Task.Delay(30000, CancellationToken.None).ConfigureAwait(false);
             int wait = Array.IndexOf(args, "--wait-for-file");
@@ -60,8 +60,8 @@ namespace Test.Harness
             return exit >= 0 ? int.Parse(args[exit + 1], System.Globalization.CultureInfo.InvariantCulture) : 0;
         }
 
-        /// <summary>Acts like a harness refreshing its native login: writes a synthetic credential where the harness keeps it.</summary>
-        private static async Task WriteCredentialAsync(string[] args, string token)
+        // Acts like a harness refreshing its native login: writes a synthetic credential where the harness keeps it.
+        private static async Task WriteCredentialAsync(string[] args, string token, CancellationToken cancellationToken)
         {
             string path;
             JsonObject document;
@@ -87,15 +87,13 @@ namespace Test.Harness
                 document = new JsonObject { ["auth_method"] = "consumer", ["token"] = new JsonObject { ["access_token"] = token, ["refresh_token"] = token + "-refresh" } };
             }
             else throw new InvalidOperationException("The fixture could not find a harness credential location.");
-            await File.WriteAllTextAsync(path + ".tmp", document.ToJsonString(), CancellationToken.None).ConfigureAwait(false);
+            await File.WriteAllTextAsync(path + ".tmp", document.ToJsonString(), cancellationToken).ConfigureAwait(false);
             File.Move(path + ".tmp", path, true);
         }
 
-        /// <summary>
-        /// A synthetic Codex app-server. CODEX_HOME/fixture-mode.txt selects "ok", "error", "hang" or "exit";
-        /// CODEX_HOME/fixture-rate-limits.json supplies the rate-limit result. Records requests before answering usage.
-        /// </summary>
-        private static async Task<int> AppServerAsync(string[] args)
+        // A synthetic Codex app-server. CODEX_HOME/fixture-mode.txt selects "ok", "error", "hang" or "exit";
+        // CODEX_HOME/fixture-rate-limits.json supplies the rate-limit result. Records requests before answering usage.
+        private static async Task<int> AppServerAsync(string[] args, CancellationToken cancellationToken)
         {
             string home = Environment.GetEnvironmentVariable("CODEX_HOME") ?? throw new InvalidOperationException("The fixture requires CODEX_HOME.");
             string modePath = Path.Combine(home, "fixture-mode.txt");
@@ -104,7 +102,7 @@ namespace Test.Harness
             foreach (string argument in args) arguments.Add((JsonNode?)JsonValue.Create(argument));
             JsonArray methods = new JsonArray();
             string? line;
-            while ((line = await Console.In.ReadLineAsync().ConfigureAwait(false)) != null)
+            while ((line = await Console.In.ReadLineAsync(cancellationToken).ConfigureAwait(false)) != null)
             {
                 JsonNode? message = JsonNode.Parse(line);
                 string method = message?["method"]?.GetValue<string>() ?? "";

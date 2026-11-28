@@ -19,7 +19,7 @@ their commands on `PATH`, or set an executable path in each profile.
 
 ## Which file to download
 
-Replace `<version>` with the release version, for example `0.2.0`.
+Replace `<version>` with the release version, for example `0.2.1`.
 
 | Platform | File | What it installs |
 | --- | --- | --- |

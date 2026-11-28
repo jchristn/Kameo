@@ -39,10 +39,8 @@ namespace Kameo.Desktop
         /// <summary>How often usage for every harness's native logins is refreshed in the background.</summary>
         internal static readonly TimeSpan UsageRefreshInterval = UsageCacheDuration;
 
-        /// <summary>
-        /// A background refresh rechecks logins at least this old, so a check that finished a moment after the
-        /// previous tick is not skipped until the tick after.
-        /// </summary>
+        // A background refresh rechecks logins at least this old, so a check that finished a moment after the
+        // previous tick is not skipped until the tick after.
         private static readonly TimeSpan _BackgroundRefreshAge = UsageRefreshInterval - TimeSpan.FromMinutes(1);
         private readonly DispatcherTimer _UsageTimer;
         private HarnessKind _Harness = HarnessKind.Claude;
@@ -69,7 +67,7 @@ namespace Kameo.Desktop
             _PickFolder = pickFolder ?? PickFolderAsync;
             _PickFolderOverride = pickFolder;
             _OpenTerminal = openTerminal ?? (request => TerminalLauncher.Open(_Store, request));
-            _ReadUsage = readUsage ?? ((id, cancellationToken) => new UsageService(_Store).ReadAsync(id, false, cancellationToken));
+            _ReadUsage = readUsage ?? ((id, cancellationToken) => ReadUsageAsync(_Store, id, cancellationToken));
             _Clock = clock ?? TimeProvider.System;
             _Workspace = store.Preference("workspace") ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (!Directory.Exists(_Workspace)) _Workspace = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -157,7 +155,13 @@ namespace Kameo.Desktop
             return LaunchResult.Launched;
         }
 
-        /// <summary>Shows the dialog modal over the visible manager, or on its own when requested or when the manager is hidden.</summary>
+        private static async Task<UsageReport> ReadUsageAsync(ProfileStore store, string id, CancellationToken cancellationToken)
+        {
+            using UsageService service = new UsageService(store);
+            return await service.ReadAsync(id, false, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Shows the dialog modal over the visible manager, or on its own when requested or when the manager is hidden.
         private async Task<LaunchOptions?> ShowLaunchOptionsAsync(LaunchOptionsWindow dialog, bool standalone, CancellationToken cancellationToken)
         {
             TaskCompletionSource<LaunchOptions?> closed = new TaskCompletionSource<LaunchOptions?>();
@@ -360,7 +364,7 @@ namespace Kameo.Desktop
             Grid.SetRow(navigation, 1); panel.Children.Add(navigation);
             StackPanel bottom = Ui.Stack(
                 Ui.Button("Appearance...", ShowAppearance),
-                Ui.Text("v0.2.0 · alpha", 10, Palette.Muted));
+                Ui.Text("v" + ProductInfo.Version + " · " + ProductInfo.Stage, 10, Palette.Muted));
             Grid.SetRow(bottom, 2); panel.Children.Add(bottom);
             return new Border { Background = Palette.Sidebar, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 0, 1, 0), Child = panel };
         }

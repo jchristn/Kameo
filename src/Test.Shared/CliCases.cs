@@ -32,6 +32,13 @@ namespace Test.Shared
                 CliResult list = await RunAsync(fixture, new[] { "list" }, null, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(list.ExitCode == 0 && !list.Output.Contains("synthetic-stdin-key", StringComparison.Ordinal) && list.Output.Contains("CLI API", StringComparison.Ordinal), "CLI list leaked a key or lost the profile.");
             }),
+            KameoSuites.Case("Cli", "ProductVersionComesFromBuild", (fixture, cancellationToken) =>
+            {
+                Version? built = typeof(ProductInfo).Assembly.GetName().Version;
+                Fixture.Check(built != null && ProductInfo.Version == built.ToString(3) && ProductInfo.Version != "0.0.0", "The product version must come from the assembly version.");
+                Fixture.Check(ProductInfo.Name == "Kameo" && (ProductInfo.Version.StartsWith("0.", StringComparison.Ordinal) ? ProductInfo.Stage == "alpha" : ProductInfo.Stage.Length == 0), "Every 0.x release is labeled alpha.");
+                return Task.CompletedTask;
+            }),
             KameoSuites.Case("Cli", "UnknownCommandFails", async (fixture, cancellationToken) =>
             {
                 CliResult result = await RunAsync(fixture, new[] { "unknown-command" }, null, cancellationToken).ConfigureAwait(false);

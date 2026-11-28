@@ -13,6 +13,7 @@ namespace Test.Shared
         internal int Writes { get; private set; }
         internal bool Locked { get; set; }
 
+        /// <inheritdoc />
         public Task<string?> ReadAsync(string service, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -20,6 +21,7 @@ namespace Test.Shared
             return Task.FromResult(Items.TryGetValue(service, out string? value) ? value : null);
         }
 
+        /// <inheritdoc />
         public Task WriteAsync(string service, string credential, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();

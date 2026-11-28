@@ -14,7 +14,11 @@ namespace Test.Shared
         internal Profile Add(HarnessKind harness = HarnessKind.Codex, string name = "Work", CredentialKind kind = CredentialKind.ApiKey) => Store.Create(new Profile
         { Harness = harness, Name = name, Kind = kind, ApiKey = kind == CredentialKind.ApiKey ? "synthetic-test-key" : "" });
 
+        /// <summary>Deletes the disposable Kameo home. Safe to call more than once.</summary>
         public void Dispose() { Dispose(true); GC.SuppressFinalize(this); }
+
+        /// <summary>Deletes the disposable Kameo home when called from <see cref="Dispose()"/>.</summary>
+        /// <param name="disposing">True when called from <see cref="Dispose()"/>; false from a finalizer.</param>
         protected virtual void Dispose(bool disposing)
         {
             if (!_Disposed && disposing && Directory.Exists(Root)) Directory.Delete(Root, true);
@@ -22,20 +26,20 @@ namespace Test.Shared
         }
 
         internal static void Check(bool value, string message)
-        { if (!value) throw new InvalidOperationException(message); }
+        { if (!value) throw new TestFailureException(message); }
 
         internal static void Throws<T>(Action action) where T : Exception
         {
             try { action(); }
             catch (T) { return; }
-            throw new InvalidOperationException("Expected exception: " + typeof(T).Name);
+            throw new TestFailureException("Expected exception: " + typeof(T).Name);
         }
 
         internal static async System.Threading.Tasks.Task ThrowsAsync<T>(Func<System.Threading.Tasks.Task> action) where T : Exception
         {
             try { await action().ConfigureAwait(false); }
             catch (T) { return; }
-            throw new InvalidOperationException("Expected exception: " + typeof(T).Name);
+            throw new TestFailureException("Expected exception: " + typeof(T).Name);
         }
 
         internal static string Probe()

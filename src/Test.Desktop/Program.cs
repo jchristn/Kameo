@@ -206,10 +206,10 @@ namespace Test.Desktop
                         Profile second = store.Create(new Profile { Harness = harness, Name = "Second", Kind = CredentialKind.Native });
                         window.Refresh(); Check(ReferenceEquals(choices, HarnessMenu(window, harness)), "Native submenu was replaced.");
                         Check(((NativeMenuItem)choices.Items[0]).Header == "Launch First...", "The menu should say Launch opens options.");
-                        Click((NativeMenuItem)choices.Items[0]); Confirm(window); Check(launches.Last() == first.Id, "Menu launched another harness or profile.");
+                        Click((NativeMenuItem)choices.Items[0]); Confirm(window); Check(launches.LastOrDefault() == first.Id, "Menu launched another harness or profile.");
                         store.Select(second.Id);
                         // Resolve selection when invoked, even before the periodic UI refresh.
-                        Click((NativeMenuItem)choices.Items[0]); Confirm(window); Check(launches.Last() == second.Id, "Menu launched a stale selection.");
+                        Click((NativeMenuItem)choices.Items[0]); Confirm(window); Check(launches.LastOrDefault() == second.Id, "Menu launched a stale selection.");
                         window.RefreshIfChanged(); Check(((NativeMenuItem)choices.Items[0]).Header == "Launch Second...", "Selection label did not refresh.");
                         Click((NativeMenuItem)choices.Items[2]); Check(Title(window) == HarnessCatalog.Name(harness), "Manage profiles did not navigate.");
                         store.Delete(second.Id); store.Delete(first.Id); window.RefreshIfChanged();
@@ -237,7 +237,7 @@ namespace Test.Desktop
                     NativeMenu menu = tray.Menu;
                     NativeMenuItem Top(string header) => menu.Items.OfType<NativeMenuItem>().Single(item => item.Header == header);
                     NativeMenuItem Child(NativeMenu parent, string header) => parent.Items.OfType<NativeMenuItem>().Single(item => item.Header == header);
-                    Check(menu.Items.OfType<NativeMenuItem>().First().Header == "About Kameo", "Tray About is not the first item.");
+                    Check(menu.Items.OfType<NativeMenuItem>().FirstOrDefault()?.Header == "About Kameo", "Tray About is not the first item.");
                     Click(Top("About Kameo")); Dispatcher.UIThread.RunJobs();
                     AboutWindow about = window.OwnedWindows.OfType<AboutWindow>().Single();
                     Check(about.IsVisible && shown == 1, "Tray About did not show the About box over the manager."); about.Close();
@@ -258,9 +258,9 @@ namespace Test.Desktop
                         Click(Child(firstItem.Menu!, "Launch..."));
                         Check(Dialog(window).Owner == null && window.OwnedWindows.Count == 0, "A tray launch should open the dialog on its own so the open manager is not brought forward.");
                         Confirm(window);
-                        Check(launches.Last() == first.Id && folders.Last() == store.Root && shown == shownBefore, "Tray launch used the wrong profile or folder, or opened the manager.");
+                        Check(launches.LastOrDefault() == first.Id && folders.LastOrDefault() == store.Root && shown == shownBefore, "Tray launch used the wrong profile or folder, or opened the manager.");
                         NativeMenu secondMenu = Child(choices, "Second").Menu!;
-                        Click(Child(secondMenu, "Launch...")); Confirm(window); Check(launches.Last() == second.Id && store.Selected(harness).Id == first.Id, "Launching a profile should not change the default.");
+                        Click(Child(secondMenu, "Launch...")); Confirm(window); Check(launches.LastOrDefault() == second.Id && store.Selected(harness).Id == first.Id, "Launching a profile should not change the default.");
                         int launched = launches.Count;
                         Click(Child(secondMenu, "Launch...")); Click(Button(Dialog(window), "Cancel"));
                         Check(launches.Count == launched && shown == shownBefore, "Canceling a tray launch started a session or opened the manager.");
@@ -270,7 +270,7 @@ namespace Test.Desktop
                         LaunchOptionsWindow standalone = window.ActiveLaunchOptions ?? throw new InvalidOperationException("The tray did not open launch options while the manager was hidden.");
                         Check(standalone.Owner == null && standalone.IsVisible && !window.IsVisible && shown == shownBefore, "The hidden-manager dialog should stand alone without showing the manager.");
                         Click(Button(standalone, "Launch"));
-                        Check(launches.Count == launched + 1 && launches.Last() == second.Id, "The standalone dialog did not launch.");
+                        Check(launches.Count == launched + 1 && launches.LastOrDefault() == second.Id, "The standalone dialog did not launch.");
                         window.Show();
                         Click(Child(secondMenu, "Use as default")); Check(store.Selected(harness).Id == second.Id, "Use as default did not change the profile.");
                         choices = Top(HarnessCatalog.Name(harness)).Menu!;
@@ -285,11 +285,11 @@ namespace Test.Desktop
                             Click(lowest); await Task.Delay(20, cancellationToken);
                             Check(Dialog(window).Title == "Launch Third", "Lowest usage should open options for the native login with the most headroom.");
                             Confirm(window);
-                            Check(launches.Last() == third.Id && folders.Last() == store.Root && store.Selected(harness).Id == second.Id, "Lowest usage should launch the native login with the most headroom.");
+                            Check(launches.LastOrDefault() == third.Id && folders.LastOrDefault() == store.Root && store.Selected(harness).Id == second.Id, "Lowest usage should launch the native login with the most headroom.");
                             usage[first.Id] = 5;
                             await window.CheckUsageAsync(harness, true, cancellationToken);
                             Click(lowest); await Task.Delay(20, cancellationToken); Confirm(window);
-                            Check(launches.Last() == first.Id, "Lowest usage should follow refreshed usage.");
+                            Check(launches.LastOrDefault() == first.Id, "Lowest usage should follow refreshed usage.");
                         }
                         else Check(!choices.Items.OfType<NativeMenuItem>().Any(item => item.Header == "Lowest usage"), HarnessCatalog.Name(harness) + " has no usage, so it should not offer Lowest usage.");
                         store.Delete(second.Id); store.Delete(first.Id); store.Delete(third.Id); tray.Refresh();

@@ -49,7 +49,7 @@ namespace Test.Shared
             {
                 try { CredentialFiles.Validate(HarnessKind.Codex, "{super-secret-not-json"); }
                 catch (InvalidDataException error) { Fixture.Check(!error.ToString().Contains("super-secret", StringComparison.Ordinal), "Error leaked input."); return; }
-                throw new InvalidOperationException("Malformed JSON accepted.");
+                throw new TestFailureException("Malformed JSON accepted.");
             });
             Add("OversizeJsonRejected", fixture => Fixture.Throws<InvalidDataException>(() => CredentialFiles.Validate(HarnessKind.Codex, new string('x', 1024 * 1024 + 1))));
             Add("OversizeFileRejected", fixture => { string path = Path.Combine(fixture.Root, "large"); File.WriteAllBytes(path, new byte[1024 * 1024 + 1]); Fixture.Throws<InvalidDataException>(() => PrivateFiles.Read(path)); });

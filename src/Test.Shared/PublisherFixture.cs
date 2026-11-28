@@ -58,8 +58,15 @@ namespace Test.Shared
                 File.WriteAllText(Path.Combine(payload, artifact.Executable + target.ExecutableSuffix), "synthetic " + artifact.Name + " for " + target.Rid);
         }
 
+        /// <summary>Deletes the disposable repository. Safe to call more than once.</summary>
         public void Dispose()
         {
+            Dispose(true);
+        }
+
+        private void Dispose(bool disposing)
+        {
+            if (!disposing) return;
             try { if (Directory.Exists(Root)) Directory.Delete(Root, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }

@@ -37,7 +37,7 @@ namespace Test.Shared
                     + "\"limits\":[{\"display_name\":\"Fable\",\"utilization\":12,\"resets_at\":\"2030-01-06T09:00:00Z\"},{\"display_name\":\"Sonnet\",\"utilization\":3}],"
                     + "\"extra_usage\":{\"is_enabled\":true,\"monthly_limit\":5000}}";
                 FakeHttpHandler handler = new FakeHttpHandler(_ => Json(HttpStatusCode.OK, body));
-                UsageReport report = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(Service(fixture, handler), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Status == UsageStatus.Available && report.Source == UsageSource.Live, "Claude usage was not available: " + report.Message);
                 Fixture.Check(handler.Calls == 1 && handler.LastMethod == HttpMethod.Get && handler.LastUri == _Endpoint, "Claude usage used the wrong request.");
                 Fixture.Check(handler.LastHeaders["Authorization"] == "Bearer synthetic-access" && handler.LastHeaders["anthropic-beta"] == "oauth-2025-04-20", "Claude usage headers are wrong.");
@@ -51,7 +51,7 @@ namespace Test.Shared
                 Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddMinutes(-5));
                 string before = Saved(fixture, profile);
                 FakeHttpHandler handler = new FakeHttpHandler(request => request.RequestUri == _TokenEndpoint ? Json(HttpStatusCode.ServiceUnavailable, "synthetic-refresh") : throw new InvalidOperationException("Usage must not be checked."));
-                UsageReport report = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(Service(fixture, handler), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Status == UsageStatus.Expired && handler.Calls == 1 && report.Plan == "Max 20x", "An expired login that could not be renewed must not be sent: " + report.Message);
                 Fixture.Check(report.Message.Contains("could not renew", StringComparison.Ordinal) && !report.Message.Contains("synthetic", StringComparison.Ordinal), "The failure was not explained safely: " + report.Message);
                 Fixture.Check(Saved(fixture, profile) == before, "A failed renewal changed the saved login.");
@@ -71,7 +71,7 @@ namespace Test.Shared
                     return request.Headers.Authorization?.Parameter == "renewed-access" ? Json(HttpStatusCode.OK, "{\"five_hour\":{\"utilization\":10,\"resets_at\":null}}") : Json(HttpStatusCode.Unauthorized, "{}");
                 });
                 DateTimeOffset started = DateTimeOffset.UtcNow;
-                UsageReport report = await Service(fixture, handler, keychain).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(Service(fixture, handler, keychain), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Status == UsageStatus.Available && report.Windows.Count == 1, "Usage was not read with the renewed login: " + report.Message);
                 JsonNode sent = JsonNode.Parse(requests.Single())!;
                 Fixture.Check(sent["grant_type"]!.GetValue<string>() == "refresh_token" && sent["refresh_token"]!.GetValue<string>() == "synthetic-refresh"
@@ -83,7 +83,7 @@ namespace Test.Shared
                 Fixture.Check(oauth["subscriptionType"]!.GetValue<string>() == "max" && oauth["rateLimitTier"]!.GetValue<string>() == "default_claude_max_20x", "Renewal dropped other login fields.");
                 string service = MacCredentialBridge.ServiceName(fixture.Store.ProfileDirectory(profile.Id));
                 Fixture.Check(keychain.Writes == 1 && keychain.Items[service] == Saved(fixture, profile), "The renewed login was not saved to the Keychain.");
-                await Service(fixture, handler, keychain).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                await ReadAsync(Service(fixture, handler, keychain), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(requests.Count == 1, "A fresh login was renewed again.");
             });
             Add("ClaudeRenewalLeavesProfileInUseAlone", async (fixture, cancellationToken) =>
@@ -93,7 +93,7 @@ namespace Test.Shared
                 FakeHttpHandler handler = new FakeHttpHandler(_ => throw new InvalidOperationException("Network must not be used."));
                 using (FileStream session = fixture.Store.AcquireSessionLease(profile.Id))
                 {
-                    UsageReport report = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                    UsageReport report = await ReadAsync(Service(fixture, handler), profile.Id, false, cancellationToken).ConfigureAwait(false);
                     Fixture.Check(report.Status == UsageStatus.Expired && report.Message.Contains("session", StringComparison.Ordinal), "A profile in use should be left to its session: " + report.Message);
                 }
                 Fixture.Check(handler.Calls == 0 && Saved(fixture, profile) == before, "Kameo renewed a login while a session was using it.");
@@ -103,7 +103,7 @@ namespace Test.Shared
                 Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddMinutes(-5));
                 string before = Saved(fixture, profile);
                 FakeHttpHandler handler = new FakeHttpHandler(_ => Json(HttpStatusCode.BadRequest, "{\"error\":\"invalid_grant\",\"error_description\":\"synthetic-refresh revoked\"}"));
-                UsageReport report = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(Service(fixture, handler), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Status == UsageStatus.Expired && report.Message.Contains("Sign in again", StringComparison.Ordinal) && !report.Message.Contains("synthetic", StringComparison.Ordinal), "A revoked login should ask to sign in: " + report.Message);
                 Fixture.Check(handler.Calls == 1 && Saved(fixture, profile) == before, "A rejected renewal changed the login or checked usage.");
             });
@@ -114,7 +114,7 @@ namespace Test.Shared
                 foreach (string body in new[] { "{\"access_token\":\"\",\"expires_in\":28800}", "{\"access_token\":\"renewed-access\"}", "not json", "[]" })
                 {
                     FakeKeychain keychain = new FakeKeychain();
-                    UsageReport report = await Service(fixture, new FakeHttpHandler(_ => Json(HttpStatusCode.OK, body)), keychain).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                    UsageReport report = await ReadAsync(Service(fixture, new FakeHttpHandler(_ => Json(HttpStatusCode.OK, body)), keychain), profile.Id, false, cancellationToken).ConfigureAwait(false);
                     Fixture.Check(report.Status == UsageStatus.Expired && Saved(fixture, profile) == before && keychain.Writes == 0, "A malformed renewal response changed the login: " + body);
                 }
             });
@@ -131,10 +131,10 @@ namespace Test.Shared
                     checks++;
                     return acceptRenewed && request.Headers.Authorization?.Parameter == "renewed-access" ? Json(HttpStatusCode.OK, "{\"seven_day\":{\"utilization\":5,\"resets_at\":null}}") : Json(HttpStatusCode.Unauthorized, "{}");
                 });
-                UsageReport report = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(Service(fixture, handler), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Status == UsageStatus.Available && renewals == 1 && checks == 2, "A rejected login should be renewed and checked again once: " + report.Message);
                 acceptRenewed = false;
-                UsageReport rejected = await Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport rejected = await ReadAsync(Service(fixture, handler), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(rejected.Status == UsageStatus.Expired && renewals == 2 && checks == 4, "A login rejected after renewal must stop after one retry.");
             });
             Add("ClaudeRenewalUsesNewestKeychainLogin", async (fixture, cancellationToken) =>
@@ -151,7 +151,7 @@ namespace Test.Shared
                     requests.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
                     return Json(HttpStatusCode.OK, _Renewed);
                 });
-                await Service(fixture, handler, keychain).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                await ReadAsync(Service(fixture, handler, keychain), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 JsonNode sent = JsonNode.Parse(requests.Single())!;
                 Fixture.Check(sent["refresh_token"]!.GetValue<string>() == "keychain-refresh" && sent["client_id"]!.GetValue<string>() == "synthetic-client" && sent["scope"] == null, "Renewal did not use the newest Keychain login and its client.");
                 Fixture.Check(keychain.Items[MacCredentialBridge.ServiceName(directory)] == Saved(fixture, profile) && Saved(fixture, profile).Contains("renewed-refresh", StringComparison.Ordinal), "The Keychain and file disagree after renewal.");
@@ -162,7 +162,7 @@ namespace Test.Shared
                 string before = Saved(fixture, profile);
                 FakeKeychain keychain = new FakeKeychain { Locked = true };
                 FakeHttpHandler handler = new FakeHttpHandler(_ => throw new InvalidOperationException("Network must not be used."));
-                UsageReport report = await Service(fixture, handler, keychain).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(Service(fixture, handler, keychain), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Status == UsageStatus.Expired && handler.Calls == 0 && Saved(fixture, profile) == before && keychain.Writes == 0, "An unreadable Keychain must stop renewal, since it may hold a newer login.");
             });
             Add("ClaudeConcurrentChecksRenewOnce", async (fixture, cancellationToken) =>
@@ -176,13 +176,13 @@ namespace Test.Shared
                     Thread.Sleep(200);
                     return Json(HttpStatusCode.OK, _Renewed);
                 });
-                UsageReport[] reports = await Task.WhenAll(Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken), Service(fixture, handler).ReadAsync(profile.Id, false, cancellationToken)).ConfigureAwait(false);
+                UsageReport[] reports = await Task.WhenAll(ReadAsync(Service(fixture, handler), profile.Id, false, cancellationToken), ReadAsync(Service(fixture, handler), profile.Id, false, cancellationToken)).ConfigureAwait(false);
                 Fixture.Check(renewals == 1 && reports.All(report => report.Status == UsageStatus.Available), "Concurrent checks renewed twice, which would invalidate the first rotated token.");
             });
             Add("ClaudeRejectedLoginIsExpired", async (fixture, cancellationToken) =>
             {
                 Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddHours(4));
-                UsageReport report = await Service(fixture, new FakeHttpHandler(_ => Json(HttpStatusCode.Unauthorized, "{\"error\":\"synthetic-access\"}"))).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(Service(fixture, new FakeHttpHandler(_ => Json(HttpStatusCode.Unauthorized, "{\"error\":\"synthetic-access\"}"))), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Status == UsageStatus.Expired && !report.Message.Contains("synthetic", StringComparison.Ordinal), "A 401 should ask for a refresh without echoing the response.");
             });
             Add("ClaudeFailuresAreReportedSafely", async (fixture, cancellationToken) =>
@@ -199,7 +199,7 @@ namespace Test.Shared
                     _ => throw new HttpRequestException("synthetic-access network failure")
                 })
                 {
-                    UsageReport report = await Service(fixture, new FakeHttpHandler(respond)).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                    UsageReport report = await ReadAsync(Service(fixture, new FakeHttpHandler(respond)), profile.Id, false, cancellationToken).ConfigureAwait(false);
                     Fixture.Check(report.Status == UsageStatus.Unavailable && report.Windows.Count == 0 && report.Message.Length > 0, "A failed check was not reported as unavailable.");
                     Fixture.Check(!report.Message.Contains("synthetic", StringComparison.Ordinal), "A failure message leaked response or credential text.");
                 }
@@ -208,15 +208,15 @@ namespace Test.Shared
             {
                 FakeHttpHandler handler = new FakeHttpHandler(_ => throw new InvalidOperationException("Network must not be used."));
                 Profile signedOut = fixture.Add(HarnessKind.Claude, "Signed out", CredentialKind.Native);
-                Fixture.Check((await Service(fixture, handler).ReadAsync(signedOut.Id, false, cancellationToken).ConfigureAwait(false)).Status == UsageStatus.SignedOut, "Missing logins should be signed out.");
+                Fixture.Check((await ReadAsync(Service(fixture, handler), signedOut.Id, false, cancellationToken).ConfigureAwait(false)).Status == UsageStatus.SignedOut, "Missing logins should be signed out.");
                 Profile profile = ClaudeProfile(fixture, DateTimeOffset.UtcNow.AddHours(4));
-                UsageReport offline = await Service(fixture, handler).ReadAsync(profile.Id, true, cancellationToken).ConfigureAwait(false);
+                UsageReport offline = await ReadAsync(Service(fixture, handler), profile.Id, true, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(offline.Status == UsageStatus.NotChecked && handler.Calls == 0, "Offline checks must not use the network.");
             });
             Add("ApiKeyAndOtherHarnessesNotApplicable", async (fixture, cancellationToken) =>
             {
                 FakeHttpHandler handler = new FakeHttpHandler(_ => throw new InvalidOperationException("Network must not be used."));
-                UsageService service = Service(fixture, handler);
+                using UsageService service = Service(fixture, handler);
                 foreach (Profile profile in new[] { fixture.Add(HarnessKind.Claude, "Claude key"), fixture.Add(HarnessKind.Codex, "Codex key"), fixture.Add(HarnessKind.Antigravity, "Google", CredentialKind.Native), fixture.Add(HarnessKind.Mux, "Mux", CredentialKind.Native) })
                 {
                     UsageReport report = await service.ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
@@ -238,7 +238,7 @@ namespace Test.Shared
                     LogLine(now.AddMinutes(-15), "{\"used_percent\":12.0,\"window_minutes\":300,\"resets_at\":" + future + "}", "{\"used_percent\":30.0,\"window_minutes\":10080,\"resets_at\":" + weekly + "}", "pro"),
                     "{\"timestamp\":\"" + now.AddMinutes(-11).ToString("O", CultureInfo.InvariantCulture) + "\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":null,\"rate_limits\":null}}",
                     "{\"timestamp\":\"" + now.AddMinutes(-10).ToString("O", CultureInfo.InvariantCulture) + "\",\"type\":\"response_item\",\"payload\":{\"text\":\"partial");
-                UsageReport report = await new UsageService(fixture.Store).ReadAsync(profile.Id, true, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(new UsageService(fixture.Store), profile.Id, true, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Status == UsageStatus.Available && report.Source == UsageSource.SessionLog, "Session log usage missing: " + report.Message);
                 Fixture.Check(string.Join("|", report.Windows.Select(window => window.Label + "=" + window.UsedPercent.ToString(CultureInfo.InvariantCulture))) == "5-hour=12|Weekly=30", "Wrong snapshot: " + string.Join("|", report.Windows.Select(window => window.Label + "=" + window.UsedPercent)));
                 Fixture.Check(report.Plan == "Pro" && report.Detail == "Credits 2,500" && report.ObservedUtc != null && Math.Abs((report.ObservedUtc.Value - now.AddMinutes(-15)).TotalSeconds) < 1, "Plan, credits or observation time missing.");
@@ -251,16 +251,16 @@ namespace Test.Shared
                 DateTimeOffset observed = now.AddHours(-1);
                 WriteLog(fixture.Store.ProfileDirectory(profile.Id), "rollout-legacy.jsonl", observed,
                     LogLine(observed, "{\"used_percent\":90.0,\"window_minutes\":300,\"resets_at\":" + now.AddMinutes(-5).ToUnixTimeSeconds() + "}", "{\"used_percent\":40.0,\"window_minutes\":10080,\"resets_in_seconds\":7200}", "plus"));
-                UsageReport report = await new UsageService(fixture.Store).ReadAsync(profile.Id, true, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(new UsageService(fixture.Store), profile.Id, true, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Windows.Count == 2 && report.Windows[0].UsedPercent == 0 && report.Windows[0].ResetsAt == null, "A window that reset after the session should show no use.");
                 Fixture.Check(report.Windows[1].UsedPercent == 40 && report.Windows[1].ResetsAt == observed.AddSeconds(7200), "Relative reset times should be anchored to the log timestamp.");
             });
             Add("CodexOfflineWithoutLogsAndSignedOut", async (fixture, cancellationToken) =>
             {
                 Profile signedOut = fixture.Add(HarnessKind.Codex, "Signed out", CredentialKind.Native);
-                Fixture.Check((await new UsageService(fixture.Store).ReadAsync(signedOut.Id, true, cancellationToken).ConfigureAwait(false)).Status == UsageStatus.SignedOut, "Missing Codex login should be signed out.");
+                Fixture.Check((await ReadAsync(new UsageService(fixture.Store), signedOut.Id, true, cancellationToken).ConfigureAwait(false)).Status == UsageStatus.SignedOut, "Missing Codex login should be signed out.");
                 Profile profile = CodexProfile(fixture);
-                Fixture.Check((await new UsageService(fixture.Store).ReadAsync(profile.Id, true, cancellationToken).ConfigureAwait(false)).Status == UsageStatus.NotChecked, "No logs offline should be not checked.");
+                Fixture.Check((await ReadAsync(new UsageService(fixture.Store), profile.Id, true, cancellationToken).ConfigureAwait(false)).Status == UsageStatus.NotChecked, "No logs offline should be not checked.");
             });
             Add("CodexLiveUsesIsolatedAppServer", async (fixture, cancellationToken) =>
             {
@@ -269,7 +269,7 @@ namespace Test.Shared
                 long reset = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds();
                 string codex = "{\"limitId\":\"codex\",\"primary\":{\"usedPercent\":42,\"windowDurationMins\":300,\"resetsAt\":" + reset + "},\"secondary\":{\"usedPercent\":18,\"windowDurationMins\":10080,\"resetsAt\":" + reset + "},\"credits\":{\"hasCredits\":true,\"unlimited\":false,\"balance\":\"1250\"},\"planType\":\"plus\"}";
                 File.WriteAllText(Path.Combine(directory, "fixture-rate-limits.json"), "{\"rateLimits\":" + codex + ",\"rateLimitsByLimitId\":{\"codex_spark\":{\"limitId\":\"codex_spark\",\"limitName\":\"Spark\",\"primary\":{\"usedPercent\":5,\"windowDurationMins\":10080,\"resetsAt\":" + reset + "}},\"codex\":" + codex + "}}");
-                UsageReport report = await new UsageService(fixture.Store).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(new UsageService(fixture.Store), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Status == UsageStatus.Available && report.Source == UsageSource.Live, "Live Codex usage failed: " + report.Message);
                 Fixture.Check(string.Join("|", report.Windows.Select(window => window.Label + "=" + window.UsedPercent.ToString(CultureInfo.InvariantCulture))) == "5-hour=42|Weekly=18|Spark Weekly=5", "Wrong live windows: " + string.Join("|", report.Windows.Select(window => window.Label)));
                 Fixture.Check(report.Plan == "Plus" && report.Detail == "Credits 1,250" && report.Windows[0].ResetsAt == DateTimeOffset.FromUnixTimeSeconds(reset), "Live plan, credits or reset missing.");
@@ -286,14 +286,14 @@ namespace Test.Shared
                 Profile profile = CodexProfile(fixture, Fixture.Probe());
                 string directory = fixture.Store.ProfileDirectory(profile.Id);
                 File.WriteAllText(Path.Combine(directory, "fixture-mode.txt"), "error");
-                UsageReport failed = await new UsageService(fixture.Store).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport failed = await ReadAsync(new UsageService(fixture.Store), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(failed.Status == UsageStatus.Unavailable && failed.Message.Contains("sign in", StringComparison.OrdinalIgnoreCase), "App-server errors should explain sign-in: " + failed.Message);
                 DateTimeOffset now = DateTimeOffset.UtcNow;
                 WriteLog(directory, "rollout-a.jsonl", now, LogLine(now.AddMinutes(-1), "{\"used_percent\":7.0,\"window_minutes\":300,\"resets_at\":" + now.AddHours(2).ToUnixTimeSeconds() + "}", "null", "pro"));
-                UsageReport fallback = await new UsageService(fixture.Store).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport fallback = await ReadAsync(new UsageService(fixture.Store), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(fallback.Status == UsageStatus.Available && fallback.Source == UsageSource.SessionLog && fallback.Message.StartsWith("Live check failed", StringComparison.Ordinal), "Live failures should fall back to the last session.");
                 File.WriteAllText(Path.Combine(directory, "fixture-mode.txt"), "exit");
-                UsageReport exited = await new UsageService(fixture.Store).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport exited = await ReadAsync(new UsageService(fixture.Store), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(exited.Source == UsageSource.SessionLog && exited.Message.Contains("exited", StringComparison.Ordinal), "An app-server exit should fall back: " + exited.Message);
             });
             Add("CodexLiveTimeoutStopsAppServer", async (fixture, cancellationToken) =>
@@ -301,17 +301,17 @@ namespace Test.Shared
                 Profile profile = CodexProfile(fixture, Fixture.Probe());
                 File.WriteAllText(Path.Combine(fixture.Store.ProfileDirectory(profile.Id), "fixture-mode.txt"), "hang");
                 System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-                UsageReport report = await new UsageService(fixture.Store, null, null, null, TimeSpan.FromSeconds(2)).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport report = await ReadAsync(new UsageService(fixture.Store, null, null, null, TimeSpan.FromSeconds(2)), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(report.Status == UsageStatus.Unavailable && report.Message.Contains("in time", StringComparison.Ordinal) && watch.Elapsed < TimeSpan.FromSeconds(15), "A hung app-server was not stopped: " + report.Message);
                 using FileStream exclusive = fixture.Store.AcquireLease(profile.Id);
             });
             Add("CodexBusyAndMissingExecutable", async (fixture, cancellationToken) =>
             {
                 Profile profile = CodexProfile(fixture, Path.Combine(fixture.Root, "missing-codex"));
-                UsageReport missing = await new UsageService(fixture.Store).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport missing = await ReadAsync(new UsageService(fixture.Store), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(missing.Status == UsageStatus.Unavailable && missing.Message.Contains("not found", StringComparison.Ordinal), "A missing executable should be explained: " + missing.Message);
                 using FileStream exclusive = fixture.Store.AcquireLease(profile.Id);
-                UsageReport busy = await new UsageService(fixture.Store).ReadAsync(profile.Id, false, cancellationToken).ConfigureAwait(false);
+                UsageReport busy = await ReadAsync(new UsageService(fixture.Store), profile.Id, false, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(busy.Status == UsageStatus.InUse, "An exclusive sign-in or edit should block live checks.");
             });
             Add("ReadAllFiltersAndKeepsOrder", async (fixture, cancellationToken) =>
@@ -320,7 +320,7 @@ namespace Test.Shared
                 fixture.Add(HarnessKind.Claude, "A claude", CredentialKind.Native);
                 fixture.Add(HarnessKind.Codex, "A codex key");
                 fixture.Add(HarnessKind.Mux, "Mux", CredentialKind.Native);
-                UsageService service = new UsageService(fixture.Store);
+                using UsageService service = new UsageService(fixture.Store);
                 IReadOnlyList<UsageReport> codex = await service.ReadAllAsync(HarnessKind.Codex, true, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(string.Join("|", codex.Select(report => report.ProfileName)) == "A codex key|B codex", "Harness filter or order is wrong.");
                 IReadOnlyList<UsageReport> all = await service.ReadAllAsync(null, true, cancellationToken).ConfigureAwait(false);
@@ -375,6 +375,11 @@ namespace Test.Shared
                 Fixture.Check(mux.ExitCode != 0 && flag.ExitCode != 0, "Unsupported usage targets should fail.");
             });
             return new TestSuiteDescriptor("Usage", "Claude Code and Codex plan usage without contacting providers", cases);
+        }
+
+        private static async Task<UsageReport> ReadAsync(UsageService service, string id, bool offline, CancellationToken cancellationToken)
+        {
+            using (service) return await service.ReadAsync(id, offline, cancellationToken).ConfigureAwait(false);
         }
 
         private static UsageService Service(Fixture fixture, FakeHttpHandler handler, FakeKeychain? keychain = null) =>

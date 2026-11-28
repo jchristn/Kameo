@@ -263,8 +263,17 @@ namespace Kameo.Core
         {
             PrivateFiles.CheckPath(Path.Combine(Root, "kameo.db"));
             SqliteConnection connection = new SqliteConnection(_ConnectionString);
-            try { connection.Open(); return connection; }
-            catch { connection.Dispose(); throw; }
+            bool opened = false;
+            try
+            {
+                connection.Open();
+                opened = true;
+                return connection;
+            }
+            finally
+            {
+                if (!opened) connection.Dispose();
+            }
         }
 
         private static void ValidateId(string id)

@@ -9,6 +9,7 @@ namespace Kameo.Desktop
     using Avalonia.Media;
     using Avalonia.Media.Imaging;
     using Avalonia.Threading;
+    using Kameo.Core;
 
     internal sealed class AboutWindow : Window
     {
@@ -28,7 +29,7 @@ namespace Kameo.Desktop
             Image mark = new Image { Name = "ProductLogo", Source = _Logo, Width = 128, Height = 128, HorizontalAlignment = HorizontalAlignment.Center };
             TextBlock name = Ui.Text("Kameo", 30, weight: FontWeight.SemiBold);
             name.HorizontalAlignment = HorizontalAlignment.Center;
-            Border version = Ui.Badge("0.2.0  ·  ALPHA", true);
+            Border version = Ui.Badge(ProductInfo.Version + "  ·  " + ProductInfo.Stage.ToUpperInvariant(), true);
             version.HorizontalAlignment = HorizontalAlignment.Center;
             HyperlinkButton repository = new HyperlinkButton
             {

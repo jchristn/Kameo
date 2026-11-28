@@ -7,8 +7,13 @@ namespace Kameo.Core
     using System.Text.RegularExpressions;
 
     /// <summary>Resolves native commands and npm Windows shims without passing user arguments through cmd.exe.</summary>
-    public static partial class ExecutableResolver
+    public static class ExecutableResolver
     {
+        // Matches the shim's real invocation: a %dp0%-rooted .exe/.js target immediately before the "%*" argument
+        // forwarder. Anchoring on "%*" skips the "IF EXIST \"%dp0%\node.exe\"" probe that modern npm .cmd shims emit
+        // first, which would otherwise resolve the harness to node.exe. Resolve() routes .js/.cjs/.mjs through node.
+        private static readonly Regex _NpmScript = new Regex("\"%~?dp0%?[\\\\/]?([^\"]+\\.(?:exe|js|cjs|mjs))\"\\s*%\\*", RegexOptions.IgnoreCase);
+
         /// <summary>Resolves a child command. JavaScript entries are run with node and separate argument values.</summary>
         public static ProcessStartInfo Resolve(ProcessStartInfo start)
         {
@@ -17,7 +22,7 @@ namespace Kameo.Core
             string extension = Path.GetExtension(resolved);
             if (extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase) || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase))
             {
-                Match match = NpmScript().Match(File.ReadAllText(resolved));
+                Match match = _NpmScript.Match(File.ReadAllText(resolved));
                 if (!match.Success) throw new InvalidOperationException("This batch launcher is not an npm shim. Set the profile executable to its .exe or JavaScript entry point.");
                 resolved = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(resolved)!, match.Groups[1].Value));
                 if (!File.Exists(resolved)) throw new FileNotFoundException("The npm launcher's target executable is missing.");
@@ -51,11 +56,12 @@ namespace Kameo.Core
             return null;
         }
 
-        // Yields the process PATH directories first, then on Windows the persisted user and machine PATH. A desktop
+        // Lists the process PATH directories first, then on Windows the persisted user and machine PATH. A desktop
         // session launched before an installer appended to PATH keeps a stale process copy, so a harness the user can
         // already run from a new terminal is still resolved. Each directory is visited once, in order.
-        private static IEnumerable<string> SearchDirectories()
+        private static List<string> SearchDirectories()
         {
+            List<string> directories = new List<string>();
             HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             string?[] sources = OperatingSystem.IsWindows()
                 ? new[] { Environment.GetEnvironmentVariable("PATH"), Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User), Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) }
@@ -64,14 +70,9 @@ namespace Kameo.Core
                 foreach (string directory in (source ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
                 {
                     string trimmed = directory.Trim('"');
-                    if (trimmed.Length > 0 && seen.Add(trimmed)) yield return trimmed;
+                    if (trimmed.Length > 0 && seen.Add(trimmed)) directories.Add(trimmed);
                 }
+            return directories;
         }
-
-        // Matches the shim's real invocation: a %dp0%-rooted .exe/.js target immediately before the "%*" argument
-        // forwarder. Anchoring on "%*" skips the "IF EXIST \"%dp0%\node.exe\"" probe that modern npm .cmd shims emit
-        // first, which would otherwise resolve the harness to node.exe. Resolve() routes .js/.cjs/.mjs through node.
-        [GeneratedRegex("\"%~?dp0%?[\\\\/]?([^\"]+\\.(?:exe|js|cjs|mjs))\"\\s*%\\*", RegexOptions.IgnoreCase)]
-        private static partial Regex NpmScript();
     }
 }
