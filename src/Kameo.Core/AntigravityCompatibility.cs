@@ -6,26 +6,53 @@ namespace Kameo.Core
     using System.Globalization;
     using System.IO;
     using System.Text;
+    using System.Text.RegularExpressions;
     using System.Threading;
     using System.Threading.Tasks;
 
-    /// <summary>Gates native account launches on the CLI version whose file-storage behavior was verified.</summary>
+    /// <summary>
+    /// Gates native account launches on a minimum CLI version: the first release whose file-based token storage Kameo
+    /// relies on for account isolation. Any later release, including new minor and major versions, is accepted.
+    /// </summary>
+    /// <remarks>Thread safe. <see cref="MinimumVersion"/> is read once per check.</remarks>
     public static class AntigravityCompatibility
     {
-        /// <summary>The earliest CLI version verified for account isolation. Later 1.5.x patch releases are accepted.</summary>
-        public const string SupportedVersion = "1.5.7";
-        private const string _Message = "Google account profiles require Antigravity CLI " + SupportedVersion
-            + " or a later 1.5.x release. This executable did not report a verified version. Set the profile executable to a supported agy binary, or update Kameo for newer CLI support. No account session was started.";
+        private static readonly Regex _VersionNumber = new Regex(@"(?<![\d.])(\d+)\.(\d+)(?:\.(\d+))?(?![\d])", RegexOptions.CultureInvariant);
+        private static Version _MinimumVersion = new Version(1, 5, 7);
 
-        /// <summary>Whether a reported version is a verified release: the 1.5 line at patch 7 or later.</summary>
+        /// <summary>
+        /// The earliest accepted CLI version. Default 1.5.7, the first release whose per-directory token file Kameo verified.
+        /// Earlier releases are rejected because their token storage was never verified and could mix accounts between
+        /// profiles. Must not be null.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">The value is null.</exception>
+        public static Version MinimumVersion
+        {
+            get => Volatile.Read(ref _MinimumVersion);
+            set => Volatile.Write(ref _MinimumVersion, value ?? throw new ArgumentNullException(nameof(value)));
+        }
+
+        /// <summary>The earliest accepted CLI version as display text, for example <c>1.5.7</c>. Never null.</summary>
+        public static string SupportedVersion => Format(MinimumVersion);
+
+        /// <summary>
+        /// Whether version output names an accepted release: the first <c>MAJOR.MINOR[.PATCH]</c> number in the text is at
+        /// least <see cref="MinimumVersion"/>. Prefixes and suffixes such as <c>agy 1.6.0 (abc123)</c> are ignored.
+        /// </summary>
+        /// <param name="version">The CLI's version output. Must not be null.</param>
+        /// <returns>True for an accepted release; false when no version number is found or it is too old.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="version"/> is null.</exception>
         public static bool IsSupported(string version)
         {
             ArgumentNullException.ThrowIfNull(version);
-            string[] parts = version.Trim().Split('.');
-            return parts.Length == 3
-                && int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int major) && major == 1
-                && int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int minor) && minor == 5
-                && int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out int patch) && patch >= 7;
+            Match match = _VersionNumber.Match(version);
+            if (!match.Success) return false;
+            if (!int.TryParse(match.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int major)
+                || !int.TryParse(match.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int minor))
+                return false;
+            int patch = 0;
+            if (match.Groups[3].Success && !int.TryParse(match.Groups[3].Value, NumberStyles.None, CultureInfo.InvariantCulture, out patch)) return false;
+            return new Version(major, minor, patch) >= Normalize(MinimumVersion);
         }
 
         /// <summary>Runs a bounded version probe using the profile's isolated environment, with a five-second timeout.</summary>
@@ -52,7 +79,7 @@ namespace Kameo.Core
                 Task<string> error = ReadBoundedAsync(process.StandardError, timeout.Token);
                 await Task.WhenAll(output, error, process.WaitForExitAsync(timeout.Token)).ConfigureAwait(false);
                 if (process.ExitCode != 0 || !IsSupported(await output.ConfigureAwait(false)))
-                    throw new InvalidOperationException(_Message);
+                    throw new InvalidOperationException(Message());
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             { throw new InvalidOperationException("Antigravity's version check timed out. No account session was started. Verify the profile executable and try again."); }
@@ -69,10 +96,17 @@ namespace Kameo.Core
             int count;
             while ((count = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
             {
-                if (result.Length + count > 4096) throw new InvalidOperationException(_Message);
+                if (result.Length + count > 4096) throw new InvalidOperationException(Message());
                 result.Append(buffer, 0, count);
             }
             return result.ToString();
         }
+
+        private static string Message() => "Google account profiles require Antigravity CLI " + SupportedVersion
+            + " or later. This executable did not report a supported version. Update agy, or set the profile executable to the agy binary. No account session was started.";
+
+        private static Version Normalize(Version version) => new Version(version.Major, version.Minor, Math.Max(version.Build, 0));
+
+        private static string Format(Version version) => Normalize(version).ToString(3);
     }
 }

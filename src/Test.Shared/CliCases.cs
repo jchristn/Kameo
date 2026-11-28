@@ -81,7 +81,7 @@ namespace Test.Shared
                 Fixture.Check(launch.ExitCode == 17 && File.Exists(capture), "Selected account launch failed.");
                 string token = Path.Combine(fixture.Store.ProfileDirectory(id), HarnessCatalog.CredentialFile(HarnessKind.Antigravity));
                 Fixture.Check(File.ReadAllText(token).Contains("synthetic-cli-login", StringComparison.Ordinal), "Relaunch lost the account token.");
-                File.WriteAllText(Path.Combine(fixture.Root, "probe-version.txt"), "2.0.0");
+                File.WriteAllText(Path.Combine(fixture.Root, "probe-version.txt"), "1.5.6");
                 CliResult incompatible = await RunAsync(fixture, new[] { "login", id }, null, cancellationToken).ConfigureAwait(false);
                 Fixture.Check(incompatible.ExitCode == 1 && incompatible.Error.Contains(AntigravityCompatibility.SupportedVersion, StringComparison.Ordinal), "CLI did not explain its compatibility requirement.");
             }),

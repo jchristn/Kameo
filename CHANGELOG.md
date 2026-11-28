@@ -4,6 +4,12 @@ All notable changes to Kameo are recorded here. Versions follow [Semantic Versio
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-27
+
+Alpha. Antigravity version support.
+
+- Antigravity Google account profiles accept any CLI release from 1.5.7 on, including new minor and major versions such as 1.6 and 2.0. Only releases older than 1.5.7 are rejected. Kameo also finds the version number inside decorated output such as `agy version 1.6.3 (build abc123)`. The minimum is `AntigravityCompatibility.MinimumVersion`.
+
 ## [0.2.1] - 2026-11-27
 
 Alpha. Code-standard compliance; no behavior changes for users.

@@ -71,7 +71,7 @@ namespace Kameo.Desktop
                 Ui.Button("Browse endpoints...", () => _ = ChooseMuxEndpointsAsync(CancellationToken.None)),
                 Ui.Text("Multiple profiles can use the same file. Changes apply on the next launch. Kameo reads this file without modifying it. Leave blank to use Setup or an imported copy.", 12, Palette.Muted));
             TextBlock nativeHint = Ui.Text(harness == HarnessKind.Antigravity
-                ? "Requires Antigravity CLI " + AntigravityCompatibility.SupportedVersion + ". Save, then click Sign in. Open the URL shown in the terminal, sign in with this profile's Google account, and paste the authorization code back into that terminal. Each profile keeps its own login."
+                ? "Requires Antigravity CLI " + AntigravityCompatibility.SupportedVersion + " or later. Save, then click Sign in. Open the URL shown in the terminal, sign in with this profile's Google account, and paste the authorization code back into that terminal. Each profile keeps its own login."
                 : harness == HarnessKind.Mux ? "Choose an endpoints file below, or save and use Setup to configure this profile." : "Save the profile, then sign in through the harness's own login flow or import an existing login. Kameo keeps its authentication files separate.", 13, Palette.Muted);
             void UpdateFields()
             {
